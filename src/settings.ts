@@ -1,36 +1,35 @@
-import {App, PluginSettingTab, Setting} from "obsidian";
-import MyPlugin from "./main";
+import { App, PluginSettingTab, Setting } from "obsidian";
+import GDriveSyncPlugin from "./main";
 
-export interface MyPluginSettings {
-	mySetting: string;
+export interface GDrivePluginSettings {
+	googleApiKey: string;
+	folderId: string;
+	syncInterval: number;
+	autoSync: boolean;
 }
 
-export const DEFAULT_SETTINGS: MyPluginSettings = {
-	mySetting: 'default'
+export const DEFAULT_SETTINGS: GDrivePluginSettings = {
+	googleApiKey: '',
+	folderId: '',
+	syncInterval: 30, // minutes
+	autoSync: false
 }
 
-export class SampleSettingTab extends PluginSettingTab {
-	plugin: MyPlugin;
+export class GDriveSettingTab extends PluginSettingTab {
+	plugin: GDriveSyncPlugin;
 
-	constructor(app: App, plugin: MyPlugin) {
+	constructor(app: App, plugin: GDriveSyncPlugin) {
 		super(app, plugin);
 		this.plugin = plugin;
 	}
 
 	display(): void {
-		const {containerEl} = this;
+		const { containerEl } = this;
 
 		containerEl.empty();
 
 		new Setting(containerEl)
-			.setName('Settings #1')
-			.setDesc('It\'s a secret')
-			.addText(text => text
-				.setPlaceholder('Enter your secret')
-				.setValue(this.plugin.settings.mySetting)
-				.onChange(async (value) => {
-					this.plugin.settings.mySetting = value;
-					await this.plugin.saveSettings();
-				}));
+			.setName('Configuration')
+			.setHeading();
 	}
 }
