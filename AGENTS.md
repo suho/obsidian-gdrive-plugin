@@ -35,10 +35,97 @@ npm run build
 
 ## Linting
 
-- To use eslint install eslint from terminal: `npm install -g eslint`
-- To use eslint to analyze this project use this command: `eslint main.ts`
-- eslint will then create a report with suggestions for code improvement by file and line number.
-- If your source code is in a folder, such as `src`, you can use eslint with this command to analyze all files in that folder: `eslint ./src/`
+- Run `npm run lint` after every coding session before finishing. Fix all errors — zero warnings allowed.
+- Run `npm run build` after lint passes to confirm TypeScript compiles cleanly.
+
+### ESLint rules in this project
+
+The project uses `eslint-plugin-obsidianmd`. Key rules and how to handle them:
+
+---
+
+#### `obsidianmd/ui/sentence-case` — UI text must use sentence case
+
+Applies to: `.setName()`, `.setDesc()`, `.setButtonText()`, `.setText()` on Obsidian API elements, and `addCommand({ name: ... })`.
+
+**Rule:** Only the first word is capitalised. All other words are lowercased unless they are in the plugin's built-in acronym list (`API`, `JSON`, `PDF`, `URL`, etc.) or brand list (`Google Drive`, `Obsidian`, `macOS`, `iOS`, etc.).
+
+**Common mistakes and fixes:**
+
+| Wrong | Correct | Reason |
+|---|---|---|
+| `'Connect Google account'` | `'Connect to Google Drive'` | `Google` alone is not a brand; `Google Drive` (two words) is |
+| `'Sync PDFs'` | `'Sync PDF files'` | `PDFs` is not in the acronym list; `PDF` is |
+| `'Wi-Fi only'` | suppress with `eslint-disable-next-line` | `Wi-Fi` is a hyphenated proper noun not in brands list |
+| `'5 MB'`, `'20 MB'` | suppress with `eslint-disable-next-line` | `MB` is not in the acronym list |
+| `'.png, .jpg, .svg'` | suppress with `eslint-disable-next-line` | Strings starting with `.` trigger false positives |
+| `'Step 1 of 2 — ...'` | suppress with `eslint-disable-next-line` | Step prefixes with em-dashes cause false positives |
+| `'Set up Google Drive Sync'` | suppress with `eslint-disable-next-line` | Mixed-case product name in title context |
+
+**When to suppress vs fix:**
+- Fix first — reword the string so no suppression is needed (preferred).
+- Suppress only when the string is a proper noun, unit abbreviation, or file extension list that cannot be reworded without losing meaning.
+- Suppression syntax: `// eslint-disable-next-line obsidianmd/ui/sentence-case` on the line immediately before the offending string.
+- Remove any suppression comment if the lint error it covers no longer exists (unused directives are also errors).
+
+---
+
+#### `@typescript-eslint/no-misused-promises` — no async callbacks in void-return positions
+
+`addEventListener`, `setTimeout`, and similar APIs expect `() => void`, not `async () => Promise<void>`. Passing an async function directly causes this error.
+
+**Pattern to use:**
+```ts
+// Wrong
+element.addEventListener('click', async () => {
+  await doSomething();
+});
+
+// Correct
+element.addEventListener('click', () => {
+  void (async () => {
+    await doSomething();
+  })();
+});
+```
+
+The same applies to `setTimeout`, `setInterval`, and any Obsidian API callbacks typed as `() => void`.
+
+---
+
+#### `import/no-nodejs-modules` — no Node.js built-in imports
+
+Node.js built-ins (`http`, `fs`, `path`, `crypto`, etc.) are blocked because the plugin must be mobile-compatible.
+
+**Exception:** `src/auth/OAuthCallbackServer.ts` intentionally uses `http` for the desktop-only OAuth localhost server. Suppress at the top of that file only:
+```ts
+// eslint-disable-next-line import/no-nodejs-modules
+import * as http from 'http';
+```
+
+Do not add new Node.js imports anywhere else. Use Web APIs or Obsidian's `requestUrl` instead.
+
+---
+
+#### `@typescript-eslint/no-unsafe-*` — unsafe `any` access
+
+Unavoidable when reading build-time injected globals (e.g. `__GDRIVE_CLIENT_ID__` injected by esbuild). Use a scoped disable block:
+```ts
+/* eslint-disable @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-explicit-any */
+this.clientId = ((globalThis as any).__GDRIVE_CLIENT_ID__ as string | undefined) ?? '';
+/* eslint-enable @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-explicit-any */
+```
+
+Never use a file-wide `eslint-disable`. Always re-enable after the specific lines.
+
+---
+
+#### Checklist before finishing any coding task
+
+1. `npm run lint` — zero errors, zero warnings
+2. `npm run build` — clean TypeScript compile, no type errors
+3. Check bundle size: `wc -c main.js` — target under 200 KB
+4. Remove any unused `eslint-disable` comments (they become lint errors themselves)
 
 ## File & folder conventions
 

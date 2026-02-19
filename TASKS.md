@@ -5,54 +5,54 @@
 
 ---
 
-## Phase 1 — Foundation + Auth
+## Phase 1 — Foundation + Auth ✅
 
 ### 1.1 Project Setup
-- [ ] Rename `package.json` name from `obsidian-sample-plugin` to `obsidian-gdrive-sync`
-- [ ] Update `tsconfig.json` lib to include `ES2015`, `ES2017`, `ES2018` (needed for async/await and modern APIs)
-- [ ] Add `diff-match-patch` as a dependency (`npm install diff-match-patch`)
-- [ ] Add `@types/diff-match-patch` as a dev dependency
-- [ ] Verify esbuild bundles `diff-match-patch` correctly (not marked as external)
-- [ ] Update `.gitignore` to ensure `main.js` is ignored (build artifact)
+- [x] Rename `package.json` name from `obsidian-sample-plugin` to `obsidian-gdrive-sync`
+- [x] Update `tsconfig.json` lib to include `ES2015`, `ES2017`, `ES2018` (needed for async/await and modern APIs)
+- [x] Add `diff-match-patch` as a dependency (`npm install diff-match-patch`)
+- [x] Add `@types/diff-match-patch` as a dev dependency
+- [x] Verify esbuild bundles `diff-match-patch` correctly (not marked as external)
+- [x] Update `.gitignore` to ensure `main.js` is ignored (build artifact)
 
 ### 1.2 Types & Settings
-- [ ] Create `src/types.ts` — define `SyncRecord`, `SyncStatus`, `ConflictInfo`, `SyncEvent`, `ActivityLogEntry` interfaces
-- [ ] Rewrite `src/settings.ts` — full `GDrivePluginSettings` interface with all fields from PLANS.md section 10.1
-- [ ] Define `DEFAULT_SETTINGS` with correct defaults (auto-sync on, pull 30s, quiescence 2s, etc.)
-- [ ] Add platform detection helper to set `wifiOnlySync` default based on mobile vs desktop
+- [x] Create `src/types.ts` — define `SyncRecord`, `SyncStatus`, `ConflictInfo`, `SyncEvent`, `ActivityLogEntry` interfaces
+- [x] Rewrite `src/settings.ts` — full `GDrivePluginSettings` interface with all fields from PLANS.md section 10.1
+- [x] Define `DEFAULT_SETTINGS` with correct defaults (auto-sync on, pull 30s, quiescence 2s, etc.)
+- [x] Add platform detection helper to set `wifiOnlySync` default based on mobile vs desktop
 
 ### 1.3 Google OAuth 2.0 + PKCE
-- [ ] Create `src/auth/GoogleAuthManager.ts` — OAuth2 flow orchestrator
-- [ ] Implement PKCE code verifier + challenge generation (using Web Crypto API)
-- [ ] Implement desktop auth flow: open browser → localhost redirect → exchange code for tokens
-- [ ] Create `src/auth/OAuthCallbackServer.ts` — temporary localhost HTTP server for OAuth callback (desktop only)
-- [ ] Implement mobile auth flow: system browser → `obsidian://gdrive-callback` URI scheme → exchange code
-- [ ] Implement token storage: persist only `refreshToken` in settings, never `accessToken`
-- [ ] Implement proactive token refresh: refresh access token 5 minutes before `tokenExpiry`
-- [ ] Implement `invalid_grant` handling: show persistent "Re-authenticate" notice
-- [ ] Implement automatic 401 → refresh → retry wrapper for all API calls
-- [ ] Register `authenticate` command in `main.ts` to trigger auth flow
+- [x] Create `src/auth/GoogleAuthManager.ts` — OAuth2 flow orchestrator
+- [x] Implement PKCE code verifier + challenge generation (using Web Crypto API)
+- [x] Implement desktop auth flow: open browser → localhost redirect → exchange code for tokens
+- [x] Create `src/auth/OAuthCallbackServer.ts` — temporary localhost HTTP server for OAuth callback (desktop only)
+- [x] Implement mobile auth flow: system browser → `obsidian://gdrive-callback` URI scheme → exchange code
+- [x] Implement token storage: persist only `refreshToken` in settings, never `accessToken`
+- [x] Implement proactive token refresh: refresh access token 5 minutes before `tokenExpiry`
+- [x] Implement `invalid_grant` handling: show persistent "Re-authenticate" notice
+- [x] Implement automatic 401 → refresh → retry wrapper for all API calls
+- [x] Register `authenticate` command in `main.ts` to trigger auth flow
 
 ### 1.4 Setup Wizard (Steps 1-2)
-- [ ] Create `src/ui/SetupWizard.ts` — multi-step Modal subclass
-- [ ] Step 1: "Connect Google Account" button → trigger auth → show connected email on success
-- [ ] Step 2: "Create new folder" input + "Select existing folder" option (list folders via API)
-- [ ] Add `drive.file` scope limitation warning: "Files must be uploaded through this plugin"
-- [ ] Wire wizard to trigger on plugin load when `setupComplete === false`
-- [ ] On wizard completion: set `setupComplete = true`, save `gDriveFolderId` and `gDriveFolderName`
+- [x] Create `src/ui/SetupWizard.ts` — multi-step Modal subclass
+- [x] Step 1: "Connect Google Account" button → trigger auth → show connected email on success
+- [x] Step 2: "Create new folder" input + "Select existing folder" option (list folders via API)
+- [x] Add `drive.file` scope limitation warning: "Files must be uploaded through this plugin"
+- [x] Wire wizard to trigger on plugin load when `setupComplete === false`
+- [x] On wizard completion: set `setupComplete = true`, save `gDriveFolderId` and `gDriveFolderName`
 
 ### 1.5 Basic Drive Client
-- [ ] Create `src/gdrive/DriveClient.ts` — wrapper around Obsidian's `requestUrl`
-- [ ] Implement `uploadFile(path, content, mimeType)` → returns GDrive file ID
-- [ ] Implement `downloadFile(fileId)` → returns file content (ArrayBuffer)
-- [ ] Implement `listFiles(folderId, pageToken?, pageSize?)` → returns file metadata array
-- [ ] Implement `deleteFile(fileId)` → trash file on GDrive
-- [ ] Implement `createFolder(name, parentId?)` → returns folder ID
-- [ ] Implement `updateFile(fileId, content)` → update existing file
-- [ ] Implement `getFileMetadata(fileId, fields)` → returns partial metadata
-- [ ] Add `Authorization: Bearer <token>` header injection via GoogleAuthManager
-- [ ] Add resumable upload support for files > 5 MB
-- [ ] Handle `storageQuotaExceeded` error as a named error type
+- [x] Create `src/gdrive/DriveClient.ts` — wrapper around Obsidian's `requestUrl`
+- [x] Implement `uploadFile(path, content, mimeType)` → returns GDrive file ID
+- [x] Implement `downloadFile(fileId)` → returns file content (ArrayBuffer)
+- [x] Implement `listFiles(folderId, pageToken?, pageSize?)` → returns file metadata array
+- [x] Implement `deleteFile(fileId)` → trash file on GDrive
+- [x] Implement `createFolder(name, parentId?)` → returns folder ID
+- [x] Implement `updateFile(fileId, content)` → update existing file
+- [x] Implement `getFileMetadata(fileId, fields)` → returns partial metadata
+- [x] Add `Authorization: Bearer <token>` header injection via GoogleAuthManager
+- [x] Add resumable upload support for files > 5 MB
+- [x] Handle `storageQuotaExceeded` error as a named error type
 
 ---
 
