@@ -70,10 +70,11 @@ export class SetupWizard extends Modal {
 		);
 
 		// If already authenticated, skip straight to folder step
-		if (this.plugin.authManager.isAuthenticated && this.plugin.settings.connectedEmail) {
+		if (this.plugin.authManager.isAuthenticated) {
+			const connectedEmail = this.plugin.settings.connectedEmail;
 			const alreadyConnected = this.contentEl.createEl('p');
 			alreadyConnected.addClass('gdrive-sync-connected');
-			alreadyConnected.setText(`Connected as ${this.plugin.settings.connectedEmail}`);
+			alreadyConnected.setText(connectedEmail ? `Connected as ${connectedEmail}` : 'Google account connected.');
 
 			new Setting(this.contentEl)
 				.addButton(btn =>
@@ -85,12 +86,13 @@ export class SetupWizard extends Modal {
 							this.renderStep();
 						})
 				)
-				.addButton(btn =>
-					btn.setButtonText('Use a different account').onClick(async () => {
-						await this.plugin.authManager.signOut();
-						this.renderStep();
-					})
-				);
+					.addButton(btn =>
+						btn.setButtonText('Use a different account').onClick(async () => {
+							await this.plugin.authManager.signOut();
+							this.plugin.refreshSettingTab();
+							this.renderStep();
+						})
+					);
 			return;
 		}
 
@@ -104,7 +106,9 @@ export class SetupWizard extends Modal {
 
 				try {
 					await this.plugin.authManager.authenticate();
-					new Notice(`Connected as ${this.plugin.settings.connectedEmail}`);
+					this.plugin.refreshSettingTab();
+					const connectedEmail = this.plugin.settings.connectedEmail;
+					new Notice(connectedEmail ? `Connected as ${connectedEmail}` : 'Google account connected.');
 					this.step = 'folder';
 					this.renderStep();
 				} catch (err) {
@@ -194,6 +198,7 @@ export class SetupWizard extends Modal {
 		this.plugin.settings.gDriveFolderName = folderName;
 		this.plugin.settings.setupComplete = true;
 		await this.plugin.saveSettings();
+		this.plugin.refreshSettingTab();
 	}
 
 	// ── Step 3: Done ──────────────────────────────────────────────────

@@ -59,60 +59,60 @@
 ## Phase 2 — Core Sync Engine
 
 ### 2.1 Sync Database
-- [ ] Create `src/sync/SyncDatabase.ts`
-- [ ] Implement load from `.obsidian/plugins/gdrive-sync/sync-db.json`
-- [ ] Implement save (atomic write with backup of previous state)
-- [ ] Implement CRUD: `getRecord(path)`, `setRecord(path, record)`, `deleteRecord(path)`, `getAllRecords()`
-- [ ] Implement `getByGDriveId(fileId)` lookup (for rename tracking)
-- [ ] Handle missing/corrupted sync-db gracefully (rebuild from scratch)
+- [x] Create `src/sync/SyncDatabase.ts`
+- [x] Implement load from `.obsidian/plugins/gdrive-sync/sync-db.json`
+- [x] Implement save (atomic write with backup of previous state)
+- [x] Implement CRUD: `getRecord(path)`, `setRecord(path, record)`, `deleteRecord(path)`, `getAllRecords()`
+- [x] Implement `getByGDriveId(fileId)` lookup (for rename tracking)
+- [x] Handle missing/corrupted sync-db gracefully (rebuild from scratch)
 
 ### 2.2 File Exclusion Rules
-- [ ] Create `src/sync/exclusions.ts`
-- [ ] Implement hardcoded exclusion list (`.git`, `.DS_Store`, `.trash`, `node_modules`, `.obsidian/cache`, `.obsidian/workspace.json`, `.obsidian/workspace-mobile.json`, dot-prefixed folders except `.obsidian`)
-- [ ] Implement `isExcluded(path, userExclusions, settings)` — checks hardcoded + user exclusions + file type toggles + max file size
-- [ ] Add file type detection from extension for selective sync toggles
-- [ ] Write unit-testable pure function (no Obsidian API dependency)
+- [x] Create `src/sync/exclusions.ts`
+- [x] Implement hardcoded exclusion list (`.git`, `.DS_Store`, `.trash`, `node_modules`, `.obsidian/cache`, `.obsidian/workspace.json`, `.obsidian/workspace-mobile.json`, dot-prefixed folders except `.obsidian`)
+- [x] Implement `isExcluded(path, userExclusions, settings)` — checks hardcoded + user exclusions + file type toggles + max file size
+- [x] Add file type detection from extension for selective sync toggles
+- [x] Write unit-testable pure function (no Obsidian API dependency)
 
 ### 2.3 Upload Manager
-- [ ] Create `src/sync/UploadManager.ts`
-- [ ] Implement single file push: read local → upload to GDrive → update SyncDatabase
-- [ ] Handle new file (create on GDrive) vs existing file (update on GDrive using stored fileId)
-- [ ] Implement rename push: update GDrive file name (preserves file ID and version history)
-- [ ] Implement delete push: trash file on GDrive + update SyncDatabase
-- [ ] Set `keepRevisionForever: true` on `.md` file uploads when setting is enabled
-- [ ] Skip excluded files (via `isExcluded`)
-- [ ] Maintain folder hierarchy on GDrive (create intermediate folders as needed)
+- [x] Create `src/sync/UploadManager.ts`
+- [x] Implement single file push: read local → upload to GDrive → update SyncDatabase
+- [x] Handle new file (create on GDrive) vs existing file (update on GDrive using stored fileId)
+- [x] Implement rename push: update GDrive file name (preserves file ID and version history)
+- [x] Implement delete push: trash file on GDrive + update SyncDatabase
+- [x] Set `keepRevisionForever: true` on `.md` file uploads when setting is enabled
+- [x] Skip excluded files (via `isExcluded`)
+- [x] Maintain folder hierarchy on GDrive (create intermediate folders as needed)
 
 ### 2.4 Download Manager
-- [ ] Create `src/sync/DownloadManager.ts`
-- [ ] Implement single file pull: download from GDrive → write to local vault → update SyncDatabase
-- [ ] Implement **active file protection**: check `app.workspace.getActiveFile()` before writing
-- [ ] Implement `pendingDownloads` queue for deferred downloads
-- [ ] Register `workspace.on('active-leaf-change')` to process pending downloads
-- [ ] Handle new remote file (create locally) vs updated remote file (overwrite locally)
-- [ ] Handle remote deletion: soft-delete local file → move to `.obsidian/plugins/gdrive-sync/trash/`
-- [ ] Handle remote rename: rename local file + update SyncDatabase path mapping
+- [x] Create `src/sync/DownloadManager.ts`
+- [x] Implement single file pull: download from GDrive → write to local vault → update SyncDatabase
+- [x] Implement **active file protection**: check `app.workspace.getActiveFile()` before writing
+- [x] Implement `pendingDownloads` queue for deferred downloads
+- [x] Register `workspace.on('active-leaf-change')` to process pending downloads
+- [x] Handle new remote file (create locally) vs updated remote file (overwrite locally)
+- [x] Handle remote deletion: soft-delete local file → move to `.obsidian/plugins/gdrive-sync/trash/`
+- [x] Handle remote rename: rename local file + update SyncDatabase path mapping
 
 ### 2.5 Change Tracker (Incremental Pull)
-- [ ] Create `src/gdrive/ChangeTracker.ts`
-- [ ] Implement `getStartPageToken()` — initial token from GDrive API
-- [ ] Implement `listChanges(pageToken)` → returns list of changed files + next pageToken
-- [ ] Store `lastSyncPageToken` in settings after each successful pull
-- [ ] Handle pagination (loop until no `nextPageToken`)
-- [ ] Filter changes to only files within our vault folder
+- [x] Create `src/gdrive/ChangeTracker.ts`
+- [x] Implement `getStartPageToken()` — initial token from GDrive API
+- [x] Implement `listChanges(pageToken)` → returns list of changed files + next pageToken
+- [x] Store `lastSyncPageToken` in settings after each successful pull
+- [x] Handle pagination (loop until no `nextPageToken`)
+- [x] Filter changes to only files within our vault folder
 
 ### 2.6 Manual Sync Command
-- [ ] Create `src/sync/SyncManager.ts` — orchestrator class
-- [ ] Implement `runSync()`: pull (via ChangeTracker + DownloadManager) then push (via UploadManager)
-- [ ] Wire `sync-now` command in `main.ts` to call `SyncManager.runSync()`
-- [ ] Add basic error handling: catch + log + show Notice on failure
+- [x] Create `src/sync/SyncManager.ts` — orchestrator class
+- [x] Implement `runSync()`: pull (via ChangeTracker + DownloadManager) then push (via UploadManager)
+- [x] Wire `sync-now` command in `main.ts` to call `SyncManager.runSync()`
+- [x] Add basic error handling: catch + log + show Notice on failure
 
 ### 2.7 Status Bar (Basic)
-- [ ] Create `src/ui/SyncStatusBar.ts`
-- [ ] Add status bar item in `main.ts` onload
-- [ ] Implement state updates: synced (green), syncing (blue), error (red)
-- [ ] Show file count during sync: "Syncing 3 files..."
-- [ ] Click handler: show Notice with last sync time (basic; full activity log comes later)
+- [x] Create `src/ui/SyncStatusBar.ts`
+- [x] Add status bar item in `main.ts` onload
+- [x] Implement state updates: synced (green), syncing (blue), error (red)
+- [x] Show file count during sync: "Syncing 3 files..."
+- [x] Click handler: show Notice with last sync time (basic; full activity log comes later)
 
 ---
 

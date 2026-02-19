@@ -4,11 +4,16 @@ import { GoogleAuthManager } from './auth/GoogleAuthManager';
 import { DriveClient } from './gdrive/DriveClient';
 import { SetupWizard } from './ui/SetupWizard';
 import { generateDeviceId } from './utils/deviceId';
+import { SyncManager } from './sync/SyncManager';
+import { SyncStatusBar } from './ui/SyncStatusBar';
 
 export default class GDriveSyncPlugin extends Plugin {
 	settings: GDrivePluginSettings;
-	authManager: GoogleAuthManager;
-	driveClient: DriveClient;
+	authManager!: GoogleAuthManager;
+	driveClient!: DriveClient;
+	syncManager!: SyncManager;
+	statusBar!: SyncStatusBar;
+	settingTab!: GDriveSettingTab;
 
 	async onload() {
 		await this.loadSettings();
@@ -22,6 +27,9 @@ export default class GDriveSyncPlugin extends Plugin {
 		// Initialize core services
 		this.authManager = new GoogleAuthManager(this);
 		this.driveClient = new DriveClient(this.authManager);
+		this.statusBar = new SyncStatusBar(this);
+		this.syncManager = new SyncManager(this, this.driveClient, this.statusBar);
+		await this.syncManager.initialize();
 
 		// Restore OAuth session from persisted refresh token (non-blocking)
 		if (this.settings.refreshToken) {
@@ -29,7 +37,8 @@ export default class GDriveSyncPlugin extends Plugin {
 		}
 
 		// Settings tab
-		this.addSettingTab(new GDriveSettingTab(this.app, this));
+		this.settingTab = new GDriveSettingTab(this.app, this);
+		this.addSettingTab(this.settingTab);
 
 		// Register URI handler for mobile OAuth callback: obsidian://gdrive-callback
 		this.registerObsidianProtocolHandler('gdrive-callback', async (params) => {
@@ -41,6 +50,7 @@ export default class GDriveSyncPlugin extends Plugin {
 			try {
 				await this.authManager.handleMobileCallback(searchParams);
 				new Notice('Google account connected successfully.');
+				this.refreshSettingTab();
 			} catch (err) {
 				new Notice(`Authentication failed: ${err instanceof Error ? err.message : String(err)}`);
 			}
@@ -62,21 +72,25 @@ export default class GDriveSyncPlugin extends Plugin {
 		this.addCommand({
 			id: 'pause-sync',
 			name: 'Pause sync',
-			callback: async () => {
-				this.settings.syncPaused = true;
-				await this.saveSettings();
-				new Notice('Google Drive sync paused.');
+			callback: () => {
+				void (async () => {
+					this.settings.syncPaused = true;
+					await this.saveSettings();
+					new Notice('Google Drive sync paused.');
+				})();
 			},
 		});
 
 		this.addCommand({
 			id: 'resume-sync',
 			name: 'Resume sync',
-			callback: async () => {
-				this.settings.syncPaused = false;
-				await this.saveSettings();
-				new Notice('Google Drive sync resumed.');
-				void this.syncNow();
+			callback: () => {
+				void (async () => {
+					this.settings.syncPaused = false;
+					await this.saveSettings();
+					new Notice('Google Drive sync resumed.');
+					void this.syncNow();
+				})();
 			},
 		});
 
@@ -97,6 +111,8 @@ export default class GDriveSyncPlugin extends Plugin {
 			this.app.workspace.onLayoutReady(() => {
 				this.openSetupWizard();
 			});
+		} else if (this.settings.syncOnStartup) {
+			void this.syncNow();
 		}
 	}
 
@@ -112,6 +128,10 @@ export default class GDriveSyncPlugin extends Plugin {
 		await this.saveData(this.settings);
 	}
 
+	refreshSettingTab(): void {
+		this.settingTab?.display();
+	}
+
 	// ── Public methods called by UI components ────────────────────────
 
 	openSetupWizard(): void {
@@ -124,13 +144,23 @@ export default class GDriveSyncPlugin extends Plugin {
 			this.openSetupWizard();
 			return;
 		}
-		// SyncManager will be implemented in Phase 2
-		new Notice('Sync triggered.');
+
+		const result = await this.syncManager.runSync();
+		if (!result) return;
+
+		const total = result.pulled + result.created + result.updated + result.renamed + result.deleted;
+		if (total === 0) {
+			new Notice('Google Drive sync complete. No changes found.');
+			return;
+		}
+
+		new Notice(
+			`Google Drive sync complete. Pulled ${result.pulled}, created ${result.created}, updated ${result.updated}, renamed ${result.renamed}, deleted ${result.deleted}.`
+		);
 	}
 
 	async triggerInitialSync(): Promise<void> {
-		// Full initial sync will be implemented in Phase 4 (Setup Wizard steps 3-5)
-		new Notice('Setup complete.');
+		await this.syncNow();
 	}
 
 	// Stubs for settings tab buttons — will be wired in later phases
@@ -147,10 +177,14 @@ export default class GDriveSyncPlugin extends Plugin {
 	}
 
 	forceFullResync(): void {
-		new Notice('Force re-sync coming soon.');
+		void this.syncNow();
 	}
 
 	resetSyncState(): void {
-		new Notice('Reset sync state coming soon.');
+		void (async () => {
+			this.syncManager.syncDb.reset();
+			await this.syncManager.syncDb.save();
+			new Notice('Sync state was reset. The next sync will rebuild state from local files.');
+		})();
 	}
 }

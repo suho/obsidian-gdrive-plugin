@@ -8,7 +8,10 @@ const TOKEN_ENDPOINT = 'https://oauth2.googleapis.com/token';
 const USERINFO_ENDPOINT = 'https://www.googleapis.com/oauth2/v2/userinfo';
 
 // Required scope: access only files created by this plugin
-const SCOPE = 'https://www.googleapis.com/auth/drive.file';
+const SCOPE = [
+	'https://www.googleapis.com/auth/drive.file',
+	'https://www.googleapis.com/auth/userinfo.email',
+].join(' ');
 
 // Mobile URI scheme for OAuth callback
 const MOBILE_REDIRECT_URI = 'obsidian://gdrive-callback';
@@ -94,8 +97,12 @@ export class GoogleAuthManager {
 		this.plugin.settings.refreshToken = '';
 		this.plugin.settings.tokenExpiry = 0;
 		this.plugin.settings.connectedEmail = '';
+		this.plugin.settings.gDriveFolderId = '';
+		this.plugin.settings.gDriveFolderName = '';
+		this.plugin.settings.lastSyncPageToken = '';
 		this.plugin.settings.setupComplete = false;
 		await this.plugin.saveSettings();
+		this.plugin.refreshSettingTab();
 	}
 
 	// ── Desktop flow ──────────────────────────────────────────────────
@@ -314,6 +321,7 @@ export class GoogleAuthManager {
 			if (data.email) {
 				this.plugin.settings.connectedEmail = data.email;
 				await this.plugin.saveSettings();
+				this.plugin.refreshSettingTab();
 			}
 		} catch {
 			// Non-fatal — email display is cosmetic

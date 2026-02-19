@@ -6,3 +6,19 @@ available in the app when your plugin is enabled.
 If your plugin does not need CSS, delete this file.
 
 */
+
+.gdrive-sync-statusbar {
+	font-weight: 600;
+}
+
+.gdrive-sync-status--synced {
+	color: var(--color-green);
+}
+
+.gdrive-sync-status--syncing {
+	color: var(--color-cyan);
+}
+
+.gdrive-sync-status--error {
+	color: var(--color-red);
+}

@@ -104,27 +104,31 @@ export class GDriveSettingTab extends PluginSettingTab {
 		// ── Account ──────────────────────────────────────────────────
 		new Setting(containerEl).setName('Account').setHeading();
 
-		if (this.plugin.settings.connectedEmail) {
+		const isConnected = !!this.plugin.settings.refreshToken;
+		if (isConnected) {
+			const accountLabel = this.plugin.settings.connectedEmail || 'Connected (email unavailable)';
+			const vaultFolderPath = this.plugin.settings.setupComplete && this.plugin.settings.gDriveFolderName
+				? `My Drive/Obsidian Vaults/${this.plugin.settings.gDriveFolderName}`
+				: 'Not set up yet';
+
 			new Setting(containerEl)
 				.setName('Google account')
-				.setDesc(this.plugin.settings.connectedEmail)
+				.setDesc(accountLabel)
 				.addButton(btn =>
 					btn
 						.setButtonText('Sign out')
 						.setWarning()
-						.onClick(async () => {
-							this.plugin.settings.refreshToken = '';
-							this.plugin.settings.tokenExpiry = 0;
-							this.plugin.settings.connectedEmail = '';
-							this.plugin.settings.setupComplete = false;
-							await this.plugin.saveSettings();
-							this.display();
+						.onClick(() => {
+							void (async () => {
+								await this.plugin.authManager.signOut();
+								this.display();
+							})();
 						})
 				);
 
 			new Setting(containerEl)
-				.setName('Remote folder')
-				.setDesc(this.plugin.settings.gDriveFolderName || this.plugin.settings.gDriveFolderId);
+				.setName('Vault folder path')
+				.setDesc(vaultFolderPath);
 		} else {
 			new Setting(containerEl)
 				.setName('Google account')
