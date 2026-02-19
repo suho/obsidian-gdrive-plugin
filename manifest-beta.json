@@ -1,0 +1,11 @@
+{
+	"id": "gdrive-sync",
+	"name": "Google Drive Sync",
+	"version": "1.0.0",
+	"minAppVersion": "0.15.0",
+	"description": "Sync your Obsidian vault with Google Drive.",
+	"author": "Su Ho",
+	"authorUrl": "https://suho.dev",
+	"fundingUrl": "",
+	"isDesktopOnly": false
+}

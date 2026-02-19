@@ -1,6 +1,5 @@
 import { Notice, Platform, requestUrl } from 'obsidian';
 import type GDriveSyncPlugin from '../main';
-import { OAuthCallbackServer } from './OAuthCallbackServer';
 
 // Google OAuth endpoints
 const AUTH_ENDPOINT = 'https://accounts.google.com/o/oauth2/v2/auth';
@@ -112,6 +111,8 @@ export class GoogleAuthManager {
 		codeChallenge: string,
 		state: string
 	): Promise<void> {
+		// Load desktop-only callback server lazily so mobile can run without Node built-ins.
+		const { OAuthCallbackServer } = await import('./OAuthCallbackServer');
 		const callbackServer = new OAuthCallbackServer();
 		const redirectUri = await callbackServer.start();
 

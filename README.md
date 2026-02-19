@@ -29,9 +29,10 @@ Quick starting guide for new plugin devs:
 ## Releasing new releases
 
 - Update your `manifest.json` with your new version number, such as `1.0.1`, and the minimum Obsidian version required for your latest release.
+- Keep `manifest-beta.json` in sync with `manifest.json` for BRAT compatibility (`npm version patch|minor|major` updates both manifests).
 - Update your `versions.json` file with `"new-plugin-version": "minimum-obsidian-version"` so older versions of Obsidian can download an older version of your plugin that's compatible.
 - Create new GitHub release using your new version number as the "Tag version". Use the exact version number, don't include a prefix `v`. See here for an example: https://github.com/obsidianmd/obsidian-sample-plugin/releases
-- Upload the files `manifest.json`, `main.js`, `styles.css` as binary attachments. Note: The manifest.json file must be in two places, first the root path of your repository and also in the release.
+- Upload the files `manifest.json`, `manifest-beta.json`, `main.js`, `styles.css` as binary attachments. Note: `manifest.json` must exist in both the repository root and in the release.
 - Publish the release.
 
 > You can simplify the version bump process by running `npm version patch`, `npm version minor` or `npm version major` after updating `minAppVersion` manually in `manifest.json`.
@@ -54,6 +55,12 @@ Quick starting guide for new plugin devs:
 ## Manually installing the plugin
 
 - Copy over `main.js`, `styles.css`, `manifest.json` to your vault `VaultFolder/.obsidian/plugins/your-plugin-id/`.
+
+## Installing with BRAT (mobile and desktop)
+
+- Install and enable the BRAT plugin in Obsidian.
+- In BRAT, select **Add beta plugin** and enter this repository as `suho/obsidian-gdrive-plugin`.
+- BRAT installs the plugin from the latest GitHub release assets (`manifest.json`, `main.js`, `styles.css`), and can use `manifest-beta.json` for legacy compatibility.
 
 ## Improve code quality with eslint
 - [ESLint](https://eslint.org/) is a tool that analyzes your code to quickly find problems. You can run ESLint against your plugin to find common bugs and ways to improve your code. 
