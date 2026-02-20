@@ -1,4 +1,4 @@
-import { TFile, normalizePath } from 'obsidian';
+import { normalizePath } from 'obsidian';
 import type GDriveSyncPlugin from '../main';
 import type { DriveClient } from '../gdrive/DriveClient';
 import type { SyncRecord } from '../types';
@@ -38,7 +38,7 @@ export interface UploadSummary {
 }
 
 interface LocalFileState {
-	file: TFile;
+	path: string;
 	hash: string;
 }
 
@@ -62,7 +62,7 @@ export class UploadManager {
 		const localFiles = await this.collectLocalFileStates();
 		const localByPath = new Map<string, LocalFileState>();
 		for (const state of localFiles) {
-			localByPath.set(state.file.path, state);
+			localByPath.set(state.path, state);
 		}
 
 		const records = this.syncDb.getAllRecords();
@@ -110,8 +110,7 @@ export class UploadManager {
 
 	async pushFile(path: string): Promise<'created' | 'updated' | 'skipped'> {
 		const normalizedPath = normalizePath(path);
-		const file = this.plugin.app.vault.getAbstractFileByPath(normalizedPath);
-		if (!(file instanceof TFile)) {
+		if (!await this.plugin.app.vault.adapter.exists(normalizedPath)) {
 			return 'skipped';
 		}
 
@@ -134,8 +133,7 @@ export class UploadManager {
 	async pushRename(oldPath: string, newPath: string): Promise<boolean> {
 		const normalizedOldPath = normalizePath(oldPath);
 		const normalizedNewPath = normalizePath(newPath);
-		const file = this.plugin.app.vault.getAbstractFileByPath(normalizedNewPath);
-		if (!(file instanceof TFile)) {
+		if (!await this.plugin.app.vault.adapter.exists(normalizedNewPath)) {
 			return false;
 		}
 
@@ -153,20 +151,50 @@ export class UploadManager {
 	}
 
 	private async collectLocalFileStates(): Promise<LocalFileState[]> {
-		const files = this.plugin.app.vault.getFiles();
+		const paths = await this.collectAllLocalPaths();
 		const states: LocalFileState[] = [];
 
-		for (const file of files) {
-			if (this.isPathExcluded(file.path)) {
+		for (const path of paths) {
+			if (this.isPathExcluded(path)) {
 				continue;
 			}
 
-			const content = await this.plugin.app.vault.adapter.readBinary(file.path);
+			const content = await this.plugin.app.vault.adapter.readBinary(path);
 			const hash = await computeContentHash(content);
-			states.push({ file, hash });
+			states.push({ path, hash });
 		}
 
 		return states;
+	}
+
+	private async collectAllLocalPaths(): Promise<string[]> {
+		const discoveredFiles = new Set<string>();
+		const pendingDirs: string[] = [''];
+		const visitedDirs = new Set<string>();
+
+		while (pendingDirs.length > 0) {
+			const dir = pendingDirs.pop() ?? '';
+			const normalizedDir = normalizePath(dir);
+			if (visitedDirs.has(normalizedDir)) {
+				continue;
+			}
+			visitedDirs.add(normalizedDir);
+
+			const listed = await this.plugin.app.vault.adapter.list(dir);
+			for (const file of listed.files) {
+				discoveredFiles.add(normalizePath(file));
+			}
+
+			for (const folder of listed.folders) {
+				const normalizedFolder = normalizePath(folder);
+				if (visitedDirs.has(normalizedFolder)) {
+					continue;
+				}
+				pendingDirs.push(normalizedFolder);
+			}
+		}
+
+		return [...discoveredFiles].sort((a, b) => a.localeCompare(b));
 	}
 
 	private findRenameSource(localHash: string, deletedCandidates: Map<string, SyncRecord>): string | null {
