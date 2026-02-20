@@ -173,15 +173,14 @@ export class GDriveSettingTab extends PluginSettingTab {
 				.addText(text => {
 					text.setValue(this.plugin.settings.refreshToken);
 					text.inputEl.readOnly = true;
-				});
-
-			new Setting(containerEl).addButton(btn =>
-				btn.setButtonText('Copy refresh token').onClick(() => {
-					void (async () => {
-						await this.copyToClipboard(this.plugin.settings.refreshToken);
-					})();
 				})
-			);
+				.addButton(btn =>
+					btn.setButtonText('Copy').onClick(() => {
+						void (async () => {
+							await this.copyToClipboard(this.plugin.settings.refreshToken);
+						})();
+					})
+				);
 		} else {
 			if (Platform.isMobile) {
 				new Setting(containerEl)
@@ -222,40 +221,39 @@ export class GDriveSettingTab extends PluginSettingTab {
 						.onChange(value => {
 							importedRefreshToken = value;
 						});
-				});
-
-			new Setting(containerEl).addButton(btn =>
-				btn
-					.setButtonText(isConnected ? 'Update token' : 'Connect')
-					.setCta()
-					.onClick(() => {
-						void (async () => {
-							const token = importedRefreshToken.trim();
-							if (!token) {
-								new Notice('Paste a refresh token first.');
-								return;
-							}
-
-							btn.setDisabled(true);
-							btn.setButtonText(isConnected ? 'Updating...' : 'Connecting...');
-
-							try {
-								await this.plugin.authManager.importRefreshToken(token);
-								const needsFolderSetup = !this.plugin.settings.setupComplete;
-								const connectedEmail = this.plugin.settings.connectedEmail;
-								new Notice(connectedEmail ? `Connected as ${connectedEmail}` : 'Google account connected.');
-								this.display();
-								if (needsFolderSetup) {
-									this.plugin.openSetupWizard();
+				})
+				.addButton(btn =>
+					btn
+						.setButtonText(isConnected ? 'Update token' : 'Connect')
+						.setCta()
+						.onClick(() => {
+							void (async () => {
+								const token = importedRefreshToken.trim();
+								if (!token) {
+									new Notice('Paste a refresh token first.');
+									return;
 								}
-							} catch (err) {
-								btn.setDisabled(false);
-								btn.setButtonText(isConnected ? 'Update token' : 'Connect');
-								new Notice(`Failed to connect: ${err instanceof Error ? err.message : String(err)}`, 10000);
-							}
-						})();
-					})
-			);
+
+								btn.setDisabled(true);
+								btn.setButtonText(isConnected ? 'Updating...' : 'Connecting...');
+
+								try {
+									await this.plugin.authManager.importRefreshToken(token);
+									const needsFolderSetup = !this.plugin.settings.setupComplete;
+									const connectedEmail = this.plugin.settings.connectedEmail;
+									new Notice(connectedEmail ? `Connected as ${connectedEmail}` : 'Google account connected.');
+									this.display();
+									if (needsFolderSetup) {
+										this.plugin.openSetupWizard();
+									}
+								} catch (err) {
+									btn.setDisabled(false);
+									btn.setButtonText(isConnected ? 'Update token' : 'Connect');
+									new Notice(`Failed to connect: ${err instanceof Error ? err.message : String(err)}`, 10000);
+								}
+							})();
+						})
+				);
 		}
 
 		// ── Sync behavior ─────────────────────────────────────────────
