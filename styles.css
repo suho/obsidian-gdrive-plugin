@@ -22,3 +22,10 @@ If your plugin does not need CSS, delete this file.
 .gdrive-sync-status--error {
 	color: var(--color-red);
 }
+
+.gdrive-sync-button-row {
+	display: flex;
+	justify-content: flex-end;
+	gap: 12px;
+	margin-top: 12px;
+}
