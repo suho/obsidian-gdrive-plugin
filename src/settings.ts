@@ -134,23 +134,26 @@ export class GDriveSettingTab extends PluginSettingTab {
 			? `My Drive/Obsidian Vaults/${this.plugin.settings.gDriveFolderName}`
 			: 'Not set up yet';
 
-		if (isConnected) {
-			const accountLabel = this.plugin.settings.connectedEmail || 'Connected (email unavailable)';
+			if (isConnected) {
+				const accountLabel = this.plugin.settings.connectedEmail || 'Connected (email unavailable)';
 
-			new Setting(containerEl)
-				.setName('Google account')
-				.setDesc(accountLabel)
-				.addButton(btn =>
-					btn
-						.setButtonText('Sign out')
-						.setWarning()
-						.onClick(() => {
-							void (async () => {
-								await this.plugin.authManager.signOut();
-								this.display();
-							})();
-						})
+				const accountSetting = new Setting(containerEl)
+					.setName('Google account')
+					.setDesc(accountLabel);
+
+				if (!Platform.isMobile) {
+					accountSetting.addButton(btn =>
+						btn
+							.setButtonText('Sign out')
+							.setWarning()
+							.onClick(() => {
+								void (async () => {
+									await this.plugin.authManager.signOut();
+									this.display();
+								})();
+							})
 					);
+				}
 
 			new Setting(containerEl)
 				.setName('Vault folder path')

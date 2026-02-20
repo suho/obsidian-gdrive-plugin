@@ -1,97 +1,165 @@
-# Obsidian Sample Plugin
+# Google Drive Sync for Obsidian
 
-This is a sample plugin for Obsidian (https://obsidian.md).
+Sync your Obsidian vault with Google Drive using the Google Drive API.
 
-This project uses TypeScript to provide type checking and documentation.
-The repo depends on the latest plugin API (obsidian.d.ts) in TypeScript Definition format, which contains TSDoc comments describing what it does.
+Plugin ID: `gdrive-sync`  
+Current manifest version: `0.5.0`  
+Desktop and mobile supported (`isDesktopOnly: false`).
 
-This sample plugin demonstrates some of the basic functionality the plugin API can do.
-- Adds a ribbon icon, which shows a Notice when clicked.
-- Adds a command "Open modal (simple)" which opens a Modal.
-- Adds a plugin setting tab to the settings page.
-- Registers a global click event and output 'click' to the console.
-- Registers a global interval which logs 'setInterval' to the console.
+## What this plugin does
 
-## First time developing plugins?
+- Connects your Google account with OAuth 2.0 (PKCE)
+- Creates or links a vault folder under `My Drive/Obsidian Vaults/...`
+- Syncs changes between local vault files and Google Drive
+- Supports manual sync, pause sync, and resume sync commands
+- Shows sync status in the status bar
+- Lets you copy a refresh token on desktop and import it on mobile
 
-Quick starting guide for new plugin devs:
+## Progress snapshot
 
-- Check if [someone already developed a plugin for what you want](https://obsidian.md/plugins)! There might be an existing plugin similar enough that you can partner up with.
-- Make a copy of this repo as a template with the "Use this template" button (login to GitHub if you don't see it).
-- Clone your repo to a local development folder. For convenience, you can place this folder in your `.obsidian/plugins/your-plugin-name` folder.
-- Install NodeJS, then run `npm i` in the command line under your repo folder.
-- Run `npm run dev` to compile your plugin from `main.ts` to `main.js`.
-- Make changes to `main.ts` (or create new `.ts` files). Those changes should be automatically compiled into `main.js`.
-- Reload Obsidian to load the new version of your plugin.
-- Enable plugin in settings window.
-- For updates to the Obsidian API run `npm update` in the command line under your repo folder.
+Current implementation status from `TASKS.md`:
 
-## Releasing new releases
+- Phase 1 Foundation and auth: done
+- Phase 2 Core sync engine: done
+- Phase 3 Auto-sync and offline: in progress
+- Phase 4 Merge and conflict UX: not started
+- Phase 5 Advanced UI and tools: in progress
+- Phase 6 Hardening and release prep: in progress
 
-- Update your `manifest.json` with your new version number, such as `1.0.1`, and the minimum Obsidian version required for your latest release.
-- Keep `manifest-beta.json` in sync with `manifest.json` for BRAT compatibility (`npm version patch|minor|major` updates both manifests).
-- Update your `versions.json` file with `"new-plugin-version": "minimum-obsidian-version"` so older versions of Obsidian can download an older version of your plugin that's compatible.
-- Create new GitHub release using your new version number as the "Tag version". Use the exact version number, don't include a prefix `v`. See here for an example: https://github.com/obsidianmd/obsidian-sample-plugin/releases
-- Upload the files `manifest.json`, `manifest-beta.json`, `main.js`, `styles.css` as binary attachments. Note: `manifest.json` must exist in both the repository root and in the release.
-- Publish the release.
+### Implemented now
 
-> You can simplify the version bump process by running `npm version patch`, `npm version minor` or `npm version major` after updating `minAppVersion` manually in `manifest.json`.
-> The command will bump version in `manifest.json` and `package.json`, and add the entry for the new version to `versions.json`
+- Desktop OAuth sign-in flow (browser + localhost callback)
+- Mobile callback support and mobile refresh-token import
+- Setup wizard for account connection and folder selection
+- Incremental pull via Google Drive Changes API
+- Upload flow for create, update, rename, delete
+- Download flow with active-file protection and deferred apply
+- Sync state database with recovery fallback
+- Selective sync toggles and conflict strategy settings UI
 
-## Adding your plugin to the community plugin list
+### Planned or partially implemented
 
-- Check the [plugin guidelines](https://docs.obsidian.md/Plugins/Releasing/Plugin+guidelines).
-- Publish an initial version.
-- Make sure you have a `README.md` file in the root of your repo.
-- Make a pull request at https://github.com/obsidianmd/obsidian-releases to add your plugin.
+- Event-driven auto-push and periodic auto-pull
+- Offline queue and reconnect replay
+- Full conflict resolution UI and merge workflow
+- Activity log view, deleted files UI, largest files UI
+- Hardening passes and broader edge-case testing
 
-## How to use
+## Important limitations
 
-- Clone this repo.
-- Make sure your NodeJS is at least v16 (`node --version`).
-- `npm i` or `yarn` to install dependencies.
-- `npm run dev` to start compilation in watch mode.
+- The plugin uses Google Drive scope `drive.file`.
+- This means it can access only files created by this plugin.
+- Files added manually in Google Drive web/app are not guaranteed to be visible to this plugin.
+- Selective sync settings are device-local and do not sync across devices.
 
-## Manually installing the plugin
+## Install on desktop app
 
-- Copy over `main.js`, `styles.css`, `manifest.json` to your vault `VaultFolder/.obsidian/plugins/your-plugin-id/`.
+### Option 1: BRAT (recommended while in beta)
 
-## Installing with BRAT (mobile and desktop)
+1. Install and enable the BRAT plugin in Obsidian desktop.
+2. Open BRAT and select **Add beta plugin**.
+3. Enter `suho/obsidian-gdrive-plugin`.
+4. Install `Google Drive Sync` from BRAT.
 
-- Install and enable the BRAT plugin in Obsidian.
-- In BRAT, select **Add beta plugin** and enter this repository as `suho/obsidian-gdrive-plugin`.
-- BRAT installs the plugin from the latest GitHub release assets (`manifest.json`, `main.js`, `styles.css`), and can use `manifest-beta.json` for legacy compatibility.
+### Option 2: Manual install
 
-## Improve code quality with eslint
-- [ESLint](https://eslint.org/) is a tool that analyzes your code to quickly find problems. You can run ESLint against your plugin to find common bugs and ways to improve your code. 
-- This project already has eslint preconfigured, you can invoke a check by running`npm run lint`
-- Together with a custom eslint [plugin](https://github.com/obsidianmd/eslint-plugin) for Obsidan specific code guidelines.
-- A GitHub action is preconfigured to automatically lint every commit on all branches.
+1. Build artifacts:
 
-## Funding URL
-
-You can include funding URLs where people who use your plugin can financially support it.
-
-The simple way is to set the `fundingUrl` field to your link in your `manifest.json` file:
-
-```json
-{
-    "fundingUrl": "https://buymeacoffee.com"
-}
+```bash
+npm install
+npm run build
 ```
 
-If you have multiple URLs, you can also do:
+2. Create plugin folder in your vault:
 
-```json
-{
-    "fundingUrl": {
-        "Buy Me a Coffee": "https://buymeacoffee.com",
-        "GitHub Sponsor": "https://github.com/sponsors",
-        "Patreon": "https://www.patreon.com/"
-    }
-}
+```text
+<Vault>/.obsidian/plugins/gdrive-sync/
 ```
 
-## API Documentation
+3. Copy these files to that folder:
+- `main.js`
+- `manifest.json`
+- `styles.css`
 
-See https://docs.obsidian.md
+4. In Obsidian desktop, go to **Settings → Community plugins** and enable **Google Drive Sync**.
+
+## Desktop first-time setup
+
+1. Open **Settings → Google Drive Sync**.
+2. Select **Connect to Google Drive**.
+3. Complete Google sign-in in your browser.
+4. Return to Obsidian and finish folder setup.
+5. Run command **Google Drive Sync: Sync now**.
+
+## Copy token on desktop and use it on mobile
+
+Use this when mobile sign-in is inconvenient or when you want to quickly connect additional mobile devices.
+
+### On desktop
+
+1. Open **Settings → Google Drive Sync**.
+2. In **Account**, find **Refresh token**.
+3. Select **Copy**.
+
+### On mobile
+
+1. Install the same plugin on mobile (BRAT is the easiest path).
+2. Open **Settings → Google Drive Sync**.
+3. In **Add refresh token**, paste the token copied from desktop.
+4. Select **Connect**.
+5. If prompted, finish folder setup in the wizard.
+
+## Commands available now
+
+- `Sync now`
+- `Pause sync`
+- `Resume sync`
+- `Open settings`
+- `Connect to Google Drive` (desktop)
+
+## Development
+
+### Prerequisites
+
+- Node.js 18+
+- npm
+
+### Configure OAuth credentials
+
+Create `.env` in the project root:
+
+```bash
+GDRIVE_CLIENT_ID=your_google_oauth_client_id
+GDRIVE_CLIENT_SECRET=your_google_oauth_client_secret
+```
+
+The build injects these values into `main.js`.
+
+### Run
+
+```bash
+npm install
+npm run dev
+```
+
+### Validate before release
+
+```bash
+npm run lint
+npm run build
+wc -c main.js
+```
+
+Target bundle size is under 200 KB.
+
+## Release checklist
+
+1. Update `manifest.json` version.
+2. Update `versions.json` mapping.
+3. Build production bundle.
+4. Publish a GitHub release tagged exactly as the version (no leading `v`).
+5. Upload `manifest.json`, `manifest-beta.json`, `main.js`, `styles.css`.
+
+## License
+
+`0BSD`

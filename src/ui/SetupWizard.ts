@@ -92,7 +92,7 @@ export class SetupWizard extends Modal {
 			alreadyConnected.addClass('gdrive-sync-connected');
 			alreadyConnected.setText(connectedEmail ? `Connected as ${connectedEmail}` : 'Google account connected.');
 
-			new Setting(this.contentEl)
+			const accountActions = new Setting(this.contentEl)
 				.addButton(btn =>
 					btn
 						.setButtonText('Continue')
@@ -101,14 +101,17 @@ export class SetupWizard extends Modal {
 							this.step = 'folder';
 							this.renderStep();
 						})
-				)
-					.addButton(btn =>
-						btn.setButtonText('Use a different account').onClick(async () => {
-							await this.plugin.authManager.signOut();
-							this.plugin.refreshSettingTab();
-							this.renderStep();
-						})
-					);
+				);
+
+			if (!Platform.isMobile) {
+				accountActions.addButton(btn =>
+					btn.setButtonText('Use a different account').onClick(async () => {
+						await this.plugin.authManager.signOut();
+						this.plugin.refreshSettingTab();
+						this.renderStep();
+					})
+				);
+			}
 			return;
 		}
 
