@@ -10,6 +10,7 @@ const FILE_FIELDS = 'id,name,mimeType,modifiedTime,md5Checksum,size,parents,tras
 
 // Max bytes for simple upload — use resumable above this
 const RESUMABLE_THRESHOLD = 5 * 1024 * 1024; // 5 MB
+type DriveResponse = Awaited<ReturnType<typeof requestUrl>>;
 
 export class DriveClientError extends Error {
 	constructor(
@@ -61,6 +62,18 @@ export class DriveClient {
 		return this.getFileMetadata(fileId);
 	}
 
+	/** Backward-compatible alias used by the Phase 1 API checklist. */
+	async uploadFile(
+		name: string,
+		content: ArrayBuffer,
+		mimeType: string,
+		parentId: string,
+		keepRevisionForever = false
+	): Promise<string> {
+		const created = await this.createFile(name, content, mimeType, parentId, keepRevisionForever);
+		return created.id;
+	}
+
 	/**
 	 * Update an existing file's content.
 	 * Returns the updated file's metadata.
@@ -88,11 +101,10 @@ export class DriveClient {
 	 * Download a file's content by its GDrive file ID.
 	 */
 	async downloadFile(fileId: string): Promise<ArrayBuffer> {
-		const token = await this.auth.getAccessToken();
-		const response = await requestUrl({
+		const response = await this.requestWithAuth(token => ({
 			url: `${API_BASE}/files/${fileId}?alt=media`,
 			headers: { Authorization: `Bearer ${token}` },
-		});
+		}));
 		this.assertOk(response.status, response.text);
 		return response.arrayBuffer;
 	}
@@ -101,8 +113,7 @@ export class DriveClient {
 	 * Rename a file on Google Drive (preserves its file ID and version history).
 	 */
 	async renameFile(fileId: string, newName: string): Promise<void> {
-		const token = await this.auth.getAccessToken();
-		const response = await requestUrl({
+		const response = await this.requestWithAuth(token => ({
 			url: `${API_BASE}/files/${fileId}?fields=${encodeURIComponent(FILE_FIELDS)}`,
 			method: 'PATCH',
 			headers: {
@@ -110,7 +121,7 @@ export class DriveClient {
 				'Content-Type': 'application/json',
 			},
 			body: JSON.stringify({ name: newName }),
-		});
+		}));
 		this.assertOk(response.status, response.text);
 	}
 
@@ -118,8 +129,7 @@ export class DriveClient {
 	 * Move a file to a new parent folder (preserves file ID and version history).
 	 */
 	async moveFile(fileId: string, newParentId: string, oldParentId: string): Promise<void> {
-		const token = await this.auth.getAccessToken();
-		const response = await requestUrl({
+		const response = await this.requestWithAuth(token => ({
 			url: `${API_BASE}/files/${fileId}?addParents=${newParentId}&removeParents=${oldParentId}`,
 			method: 'PATCH',
 			headers: {
@@ -127,7 +137,7 @@ export class DriveClient {
 				'Content-Type': 'application/json',
 			},
 			body: JSON.stringify({}),
-		});
+		}));
 		this.assertOk(response.status, response.text);
 	}
 
@@ -135,8 +145,7 @@ export class DriveClient {
 	 * Move a file to GDrive Trash (recoverable for 30 days).
 	 */
 	async trashFile(fileId: string): Promise<void> {
-		const token = await this.auth.getAccessToken();
-		const response = await requestUrl({
+		const response = await this.requestWithAuth(token => ({
 			url: `${API_BASE}/files/${fileId}?fields=id,trashed`,
 			method: 'PATCH',
 			headers: {
@@ -144,8 +153,13 @@ export class DriveClient {
 				'Content-Type': 'application/json',
 			},
 			body: JSON.stringify({ trashed: true }),
-		});
+		}));
 		this.assertOk(response.status, response.text);
+	}
+
+	/** Backward-compatible alias used by the Phase 1 API checklist. */
+	async deleteFile(fileId: string): Promise<void> {
+		await this.trashFile(fileId);
 	}
 
 	/**
@@ -153,12 +167,11 @@ export class DriveClient {
 	 * Only used for prune operations; normal deletes use trashFile.
 	 */
 	async deleteFilePermanently(fileId: string): Promise<void> {
-		const token = await this.auth.getAccessToken();
-		const response = await requestUrl({
+		const response = await this.requestWithAuth(token => ({
 			url: `${API_BASE}/files/${fileId}`,
 			method: 'DELETE',
 			headers: { Authorization: `Bearer ${token}` },
-		});
+		}));
 		// 204 No Content is the success response for DELETE
 		if (response.status !== 204 && response.status !== 200) {
 			this.assertOk(response.status, response.text);
@@ -171,14 +184,13 @@ export class DriveClient {
 	 * Create a folder on Google Drive. Returns the folder's file ID.
 	 */
 	async createFolder(name: string, parentId?: string): Promise<string> {
-		const token = await this.auth.getAccessToken();
 		const body: Record<string, unknown> = {
 			name,
 			mimeType: 'application/vnd.google-apps.folder',
 		};
 		if (parentId) body.parents = [parentId];
 
-		const response = await requestUrl({
+		const response = await this.requestWithAuth(token => ({
 			url: `${API_BASE}/files?fields=id`,
 			method: 'POST',
 			headers: {
@@ -186,7 +198,7 @@ export class DriveClient {
 				'Content-Type': 'application/json',
 			},
 			body: JSON.stringify(body),
-		});
+		}));
 		this.assertOk(response.status, response.text);
 		return (response.json as { id: string }).id;
 	}
@@ -195,17 +207,28 @@ export class DriveClient {
 	 * Find a folder by name under a given parent. Returns the folder ID or null.
 	 */
 	async findFolder(name: string, parentId?: string): Promise<string | null> {
-		const token = await this.auth.getAccessToken();
 		let q = `mimeType='application/vnd.google-apps.folder' and name='${name.replace(/'/g, "\\'")}' and trashed=false`;
 		if (parentId) q += ` and '${parentId}' in parents`;
 
-		const response = await requestUrl({
+		const response = await this.requestWithAuth(token => ({
 			url: `${API_BASE}/files?q=${encodeURIComponent(q)}&fields=files(id,name)`,
 			headers: { Authorization: `Bearer ${token}` },
-		});
+		}));
 		this.assertOk(response.status, response.text);
 		const files = (response.json as { files: DriveFileMetadata[] }).files;
 		return files.length > 0 ? files[0]?.id ?? null : null;
+	}
+
+	/** List immediate child folders under a parent folder. */
+	async listFolders(parentId: string): Promise<DriveFileMetadata[]> {
+		const q = `mimeType='application/vnd.google-apps.folder' and '${parentId}' in parents and trashed=false`;
+		const response = await this.requestWithAuth(token => ({
+			url: `${API_BASE}/files?q=${encodeURIComponent(q)}&fields=${encodeURIComponent(`files(${FILE_FIELDS})`)}`,
+			headers: { Authorization: `Bearer ${token}` },
+		}));
+		this.assertOk(response.status, response.text);
+		const files = (response.json as { files: DriveFileMetadata[] }).files;
+		return files.sort((a, b) => a.name.localeCompare(b.name));
 	}
 
 	/**
@@ -223,13 +246,12 @@ export class DriveClient {
 	}
 
 	private async findFolderInParent(name: string, parentId: string): Promise<string | null> {
-		const token = await this.auth.getAccessToken();
 		const q = `mimeType='application/vnd.google-apps.folder' and name='${name.replace(/'/g, "\\'")}' and '${parentId}' in parents and trashed=false`;
 
-		const response = await requestUrl({
+		const response = await this.requestWithAuth(token => ({
 			url: `${API_BASE}/files?q=${encodeURIComponent(q)}&fields=files(id)`,
 			headers: { Authorization: `Bearer ${token}` },
-		});
+		}));
 		this.assertOk(response.status, response.text);
 		const files = (response.json as { files: { id: string }[] }).files;
 		return files[0]?.id ?? null;
@@ -254,11 +276,10 @@ export class DriveClient {
 			});
 			if (pageToken) params.set('pageToken', pageToken);
 
-			const token = await this.auth.getAccessToken();
-			const response = await requestUrl({
+			const response = await this.requestWithAuth(token => ({
 				url: `${API_BASE}/files?${params.toString()}`,
 				headers: { Authorization: `Bearer ${token}` },
-			});
+			}));
 			this.assertOk(response.status, response.text);
 
 			const data = response.json as { files: DriveFileMetadata[]; nextPageToken?: string };
@@ -269,16 +290,34 @@ export class DriveClient {
 		return results;
 	}
 
+	/** Backward-compatible alias used by the Phase 1 API checklist. */
+	async listFiles(folderId: string, pageToken?: string, pageSize = 1000): Promise<DriveFileMetadata[]> {
+		const q = `'${folderId}' in parents and trashed=false`;
+		const params = new URLSearchParams({
+			q,
+			fields: `nextPageToken,files(${FILE_FIELDS})`,
+			pageSize: String(pageSize),
+		});
+		if (pageToken) {
+			params.set('pageToken', pageToken);
+		}
+		const response = await this.requestWithAuth(token => ({
+			url: `${API_BASE}/files?${params.toString()}`,
+			headers: { Authorization: `Bearer ${token}` },
+		}));
+		this.assertOk(response.status, response.text);
+		return (response.json as { files: DriveFileMetadata[] }).files;
+	}
+
 	/**
 	 * List trashed files in the vault folder.
 	 */
 	async listTrashedFiles(folderId: string): Promise<DriveFileMetadata[]> {
-		const token = await this.auth.getAccessToken();
 		const q = `'${folderId}' in parents and trashed=true`;
-		const response = await requestUrl({
+		const response = await this.requestWithAuth(token => ({
 			url: `${API_BASE}/files?q=${encodeURIComponent(q)}&fields=${encodeURIComponent(`files(${FILE_FIELDS})`)}`,
 			headers: { Authorization: `Bearer ${token}` },
-		});
+		}));
 		this.assertOk(response.status, response.text);
 		return (response.json as { files: DriveFileMetadata[] }).files;
 	}
@@ -287,24 +326,22 @@ export class DriveClient {
 	 * List largest files in the vault folder (for storage diagnostics).
 	 */
 	async listLargestFiles(folderId: string, limit = 20): Promise<DriveFileMetadata[]> {
-		const token = await this.auth.getAccessToken();
 		const q = `'${folderId}' in parents and trashed=false`;
-		const response = await requestUrl({
+		const response = await this.requestWithAuth(token => ({
 			url: `${API_BASE}/files?q=${encodeURIComponent(q)}&orderBy=quotaBytesUsed+desc&pageSize=${limit}&fields=${encodeURIComponent(`files(${FILE_FIELDS})`)}`,
 			headers: { Authorization: `Bearer ${token}` },
-		});
+		}));
 		this.assertOk(response.status, response.text);
 		return (response.json as { files: DriveFileMetadata[] }).files;
 	}
 
 	// ── Single file metadata ──────────────────────────────────────────
 
-	async getFileMetadata(fileId: string): Promise<DriveFileMetadata> {
-		const token = await this.auth.getAccessToken();
-		const response = await requestUrl({
-			url: `${API_BASE}/files/${fileId}?fields=${encodeURIComponent(FILE_FIELDS)}`,
+	async getFileMetadata(fileId: string, fields = FILE_FIELDS): Promise<DriveFileMetadata> {
+		const response = await this.requestWithAuth(token => ({
+			url: `${API_BASE}/files/${fileId}?fields=${encodeURIComponent(fields)}`,
 			headers: { Authorization: `Bearer ${token}` },
-		});
+		}));
 		this.assertOk(response.status, response.text);
 		return response.json as DriveFileMetadata;
 	}
@@ -316,11 +353,10 @@ export class DriveClient {
 	 * Store this and use it for subsequent incremental change queries.
 	 */
 	async getStartPageToken(): Promise<string> {
-		const token = await this.auth.getAccessToken();
-		const response = await requestUrl({
+		const response = await this.requestWithAuth(token => ({
 			url: `${API_BASE}/changes/startPageToken`,
 			headers: { Authorization: `Bearer ${token}` },
-		});
+		}));
 		this.assertOk(response.status, response.text);
 		return (response.json as { startPageToken: string }).startPageToken;
 	}
@@ -330,17 +366,16 @@ export class DriveClient {
 	 * Returns changed file metadata and the next page token to store.
 	 */
 	async listChanges(pageToken: string): Promise<{ changes: DriveChange[]; nextPageToken: string; newStartPageToken?: string }> {
-		const token = await this.auth.getAccessToken();
 		const params = new URLSearchParams({
 			pageToken,
 			fields: `nextPageToken,newStartPageToken,changes(fileId,removed,file(${FILE_FIELDS}))`,
 			spaces: 'drive',
 		});
 
-		const response = await requestUrl({
+		const response = await this.requestWithAuth(token => ({
 			url: `${API_BASE}/changes?${params.toString()}`,
 			headers: { Authorization: `Bearer ${token}` },
-		});
+		}));
 		this.assertOk(response.status, response.text);
 		return response.json as { changes: DriveChange[]; nextPageToken: string; newStartPageToken?: string };
 	}
@@ -351,11 +386,10 @@ export class DriveClient {
 	 * List all revisions for a file.
 	 */
 	async listRevisions(fileId: string): Promise<DriveRevision[]> {
-		const token = await this.auth.getAccessToken();
-		const response = await requestUrl({
+		const response = await this.requestWithAuth(token => ({
 			url: `${API_BASE}/files/${fileId}/revisions?fields=revisions(id,modifiedTime,mimeType,size,keepForever)`,
 			headers: { Authorization: `Bearer ${token}` },
-		});
+		}));
 		this.assertOk(response.status, response.text);
 		return (response.json as { revisions: DriveRevision[] }).revisions ?? [];
 	}
@@ -364,11 +398,10 @@ export class DriveClient {
 	 * Download a specific revision's content.
 	 */
 	async downloadRevision(fileId: string, revisionId: string): Promise<ArrayBuffer> {
-		const token = await this.auth.getAccessToken();
-		const response = await requestUrl({
+		const response = await this.requestWithAuth(token => ({
 			url: `${API_BASE}/files/${fileId}/revisions/${revisionId}?alt=media`,
 			headers: { Authorization: `Bearer ${token}` },
-		});
+		}));
 		this.assertOk(response.status, response.text);
 		return response.arrayBuffer;
 	}
@@ -382,8 +415,7 @@ export class DriveClient {
 		const latest = revisions[revisions.length - 1];
 		if (!latest || latest.keepForever) return;
 
-		const token = await this.auth.getAccessToken();
-		await requestUrl({
+		const response = await this.requestWithAuth(token => ({
 			url: `${API_BASE}/files/${fileId}/revisions/${latest.id}`,
 			method: 'PATCH',
 			headers: {
@@ -391,7 +423,8 @@ export class DriveClient {
 				'Content-Type': 'application/json',
 			},
 			body: JSON.stringify({ keepForever: true }),
-		});
+		}));
+		this.assertOk(response.status, response.text);
 	}
 
 	// ── About / Quota ─────────────────────────────────────────────────
@@ -400,11 +433,10 @@ export class DriveClient {
 	 * Get storage usage information for the connected Google account.
 	 */
 	async getStorageQuota(): Promise<{ used: number; limit: number }> {
-		const token = await this.auth.getAccessToken();
-		const response = await requestUrl({
+		const response = await this.requestWithAuth(token => ({
 			url: `${API_BASE}/about?fields=storageQuota`,
 			headers: { Authorization: `Bearer ${token}` },
-		});
+		}));
 		this.assertOk(response.status, response.text);
 		const quota = (response.json as { storageQuota: { usage: string; limit: string } }).storageQuota;
 		return {
@@ -444,8 +476,7 @@ export class DriveClient {
 			offset += part.byteLength;
 		}
 
-		const token = await this.auth.getAccessToken();
-		const response = await requestUrl({
+		const response = await this.requestWithAuth(token => ({
 			url: `${UPLOAD_BASE}/files?uploadType=multipart&fields=id`,
 			method: 'POST',
 			headers: {
@@ -453,7 +484,7 @@ export class DriveClient {
 				'Content-Type': `multipart/related; boundary=${boundary}`,
 			},
 			body: body.buffer,
-		} as RequestUrlParam);
+		}));
 
 		this.assertOk(response.status, response.text);
 		return (response.json as { id: string }).id;
@@ -464,8 +495,7 @@ export class DriveClient {
 		content: ArrayBuffer,
 		mimeType: string
 	): Promise<void> {
-		const token = await this.auth.getAccessToken();
-		const response = await requestUrl({
+		const response = await this.requestWithAuth(token => ({
 			url: `${UPLOAD_BASE}/files/${fileId}?uploadType=media&fields=id`,
 			method: 'PATCH',
 			headers: {
@@ -473,7 +503,7 @@ export class DriveClient {
 				'Content-Type': mimeType,
 			},
 			body: content,
-		});
+		}));
 		this.assertOk(response.status, response.text);
 	}
 
@@ -488,14 +518,12 @@ export class DriveClient {
 		mimeType: string,
 		fileId?: string
 	): Promise<string> {
-		const token = await this.auth.getAccessToken();
-
 		// Step 1: Initiate resumable session
 		const initiateUrl = fileId
 			? `${UPLOAD_BASE}/files/${fileId}?uploadType=resumable`
 			: `${UPLOAD_BASE}/files?uploadType=resumable`;
 
-		const initiateResponse = await requestUrl({
+		const initiateResponse = await this.requestWithAuth(token => ({
 			url: initiateUrl,
 			method: fileId ? 'PATCH' : 'POST',
 			headers: {
@@ -505,7 +533,7 @@ export class DriveClient {
 				'X-Upload-Content-Length': String(content.byteLength),
 			},
 			body: JSON.stringify(metadata),
-		});
+		}));
 
 		if (initiateResponse.status !== 200) {
 			this.assertOk(initiateResponse.status, initiateResponse.text);
@@ -532,6 +560,18 @@ export class DriveClient {
 		if (!result.id && fileId) return fileId;
 		if (!result.id) throw new DriveClientError('Resumable upload: no file ID in response');
 		return result.id;
+	}
+
+	private async requestWithAuth(buildRequest: (token: string) => RequestUrlParam): Promise<DriveResponse> {
+		const initialToken = await this.auth.getAccessToken();
+		let response = await requestUrl(buildRequest(initialToken));
+		if (response.status !== 401) {
+			return response;
+		}
+
+		const refreshedToken = await this.auth.refreshAfterUnauthorized();
+		response = await requestUrl(buildRequest(refreshedToken));
+		return response;
 	}
 
 	// ── Error handling ────────────────────────────────────────────────

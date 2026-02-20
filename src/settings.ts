@@ -6,6 +6,7 @@ export interface GDrivePluginSettings {
 	refreshToken: string;
 	tokenExpiry: number;           // Unix ms timestamp of access token expiry
 	connectedEmail: string;
+	needsReauthentication: boolean;
 
 	// Sync target
 	gDriveFolderId: string;
@@ -43,6 +44,8 @@ export interface GDrivePluginSettings {
 	syncPaused: boolean;
 	lastSyncPageToken: string;     // GDrive Changes API incremental token
 	deviceId: string;              // UUID generated on first run, identifies this device
+	pendingOAuthState: string;     // mobile OAuth callback CSRF state
+	pendingCodeVerifier: string;   // mobile OAuth PKCE verifier
 }
 
 export const DEFAULT_SETTINGS: GDrivePluginSettings = {
@@ -50,6 +53,7 @@ export const DEFAULT_SETTINGS: GDrivePluginSettings = {
 	refreshToken: '',
 	tokenExpiry: 0,
 	connectedEmail: '',
+	needsReauthentication: false,
 
 	// Sync target
 	gDriveFolderId: '',
@@ -87,6 +91,8 @@ export const DEFAULT_SETTINGS: GDrivePluginSettings = {
 	syncPaused: false,
 	lastSyncPageToken: '',
 	deviceId: '',
+	pendingOAuthState: '',
+	pendingCodeVerifier: '',
 };
 
 export class GDriveSettingTab extends PluginSettingTab {
@@ -103,6 +109,19 @@ export class GDriveSettingTab extends PluginSettingTab {
 
 		// ── Account ──────────────────────────────────────────────────
 		new Setting(containerEl).setName('Account').setHeading();
+		if (this.plugin.settings.needsReauthentication) {
+			new Setting(containerEl)
+				.setName('Re-authentication required')
+				.setDesc('Google account access expired. Select re-authenticate to resume sync.')
+				.addButton(btn =>
+					btn
+						.setButtonText('Re-authenticate')
+						.setCta()
+						.onClick(() => {
+							this.plugin.openSetupWizard();
+						})
+				);
+		}
 
 		const isConnected = !!this.plugin.settings.refreshToken;
 		if (isConnected) {

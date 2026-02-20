@@ -17,6 +17,9 @@ const MOBILE_REDIRECT_URI = 'obsidian://gdrive-callback';
 
 // Refresh access token this many ms before expiry (5 minutes)
 const REFRESH_BUFFER_MS = 5 * 60 * 1000;
+const MOBILE_AUTH_TIMEOUT_MS = 5 * 60 * 1000;
+const SESSION_CODE_VERIFIER_KEY = 'gdrive_code_verifier';
+const SESSION_OAUTH_STATE_KEY = 'gdrive_oauth_state';
 
 export class GoogleAuthManager {
 	// Populated by the user via plugin settings — see PLANS.md section 5.1
@@ -29,6 +32,12 @@ export class GoogleAuthManager {
 	private accessToken = '';
 	// Refresh timer handle
 	private refreshTimer: ReturnType<typeof setTimeout> | null = null;
+	private reauthNotice: Notice | null = null;
+	private mobileAuthWaiter: {
+		resolve: () => void;
+		reject: (error: Error) => void;
+		timeoutId: ReturnType<typeof setTimeout>;
+	} | null = null;
 
 	constructor(
 		private readonly plugin: GDriveSyncPlugin
@@ -39,6 +48,9 @@ export class GoogleAuthManager {
 		this.clientId = ((globalThis as any).__GDRIVE_CLIENT_ID__ as string | undefined) ?? '';
 		this.clientSecret = ((globalThis as any).__GDRIVE_CLIENT_SECRET__ as string | undefined) ?? '';
 		/* eslint-enable @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-explicit-any */
+		if (this.plugin.settings.needsReauthentication) {
+			this.showReauthenticateNotice();
+		}
 	}
 
 	/** True if we have a refresh token (i.e., the user has authenticated). */
@@ -96,10 +108,16 @@ export class GoogleAuthManager {
 		this.plugin.settings.refreshToken = '';
 		this.plugin.settings.tokenExpiry = 0;
 		this.plugin.settings.connectedEmail = '';
+		this.plugin.settings.needsReauthentication = false;
 		this.plugin.settings.gDriveFolderId = '';
 		this.plugin.settings.gDriveFolderName = '';
 		this.plugin.settings.lastSyncPageToken = '';
 		this.plugin.settings.setupComplete = false;
+		this.plugin.settings.pendingOAuthState = '';
+		this.plugin.settings.pendingCodeVerifier = '';
+		this.clearSessionMobileAuthData();
+		this.rejectMobileAuthWaiter(new Error('Authentication was cancelled.'));
+		this.clearReauthenticateNotice();
 		await this.plugin.saveSettings();
 		this.plugin.refreshSettingTab();
 	}
@@ -140,14 +158,13 @@ export class GoogleAuthManager {
 		state: string
 	): Promise<void> {
 		const authUrl = this.buildAuthUrl(codeChallenge, state, MOBILE_REDIRECT_URI);
-
-		// Store the verifier so we can use it when the URI scheme callback fires
-		sessionStorage.setItem('gdrive_code_verifier', codeVerifier);
-		sessionStorage.setItem('gdrive_oauth_state', state);
+		await this.savePendingMobileAuthData(state, codeVerifier);
+		const waitForCallback = this.waitForMobileCallback();
 
 		window.open(authUrl);
 
 		new Notice('Complete authentication in your browser, then return to Obsidian.');
+		await waitForCallback;
 	}
 
 	/**
@@ -160,28 +177,43 @@ export class GoogleAuthManager {
 		const error = params.get('error');
 
 		if (error) {
-			throw new Error(`Google OAuth error: ${error}`);
+			await this.clearPendingMobileAuthData();
+			const authError = new Error(`Google OAuth error: ${error}`);
+			this.rejectMobileAuthWaiter(authError);
+			throw authError;
 		}
 
 		if (!code || !returnedState) {
-			throw new Error('Missing code or state in OAuth callback');
+			await this.clearPendingMobileAuthData();
+			const callbackError = new Error('Missing code or state in OAuth callback');
+			this.rejectMobileAuthWaiter(callbackError);
+			throw callbackError;
 		}
 
-		const expectedState = sessionStorage.getItem('gdrive_oauth_state');
-		const codeVerifier = sessionStorage.getItem('gdrive_code_verifier');
-
-		sessionStorage.removeItem('gdrive_oauth_state');
-		sessionStorage.removeItem('gdrive_code_verifier');
+		const { state: expectedState, codeVerifier } = this.getPendingMobileAuthData();
+		await this.clearPendingMobileAuthData();
 
 		if (returnedState !== expectedState) {
-			throw new Error('OAuth state mismatch — possible CSRF attack');
+			const stateError = new Error('OAuth state mismatch — possible CSRF attack');
+			this.rejectMobileAuthWaiter(stateError);
+			throw stateError;
 		}
 
 		if (!codeVerifier) {
-			throw new Error('Missing PKCE code verifier — please retry authentication');
+			const verifierError = new Error('Missing PKCE code verifier — please retry authentication');
+			this.rejectMobileAuthWaiter(verifierError);
+			throw verifierError;
 		}
 
-		await this.exchangeCode(code, codeVerifier, MOBILE_REDIRECT_URI);
+		try {
+			await this.exchangeCode(code, codeVerifier, MOBILE_REDIRECT_URI);
+		} catch (err) {
+			const authError = err instanceof Error ? err : new Error(String(err));
+			this.rejectMobileAuthWaiter(authError);
+			throw authError;
+		}
+
+		this.resolveMobileAuthWaiter();
 	}
 
 	// ── Token exchange ────────────────────────────────────────────────
@@ -239,7 +271,11 @@ export class GoogleAuthManager {
 				this.accessToken = '';
 				this.plugin.settings.refreshToken = '';
 				this.plugin.settings.tokenExpiry = 0;
+				this.plugin.settings.connectedEmail = '';
+				this.plugin.settings.needsReauthentication = true;
 				await this.plugin.saveSettings();
+				this.plugin.refreshSettingTab();
+				this.showReauthenticateNotice();
 				throw new AuthError(
 					'Google account connection lost. Please re-authenticate in plugin settings.'
 				);
@@ -258,12 +294,14 @@ export class GoogleAuthManager {
 		this.accessToken = data.access_token;
 		const expiresInMs = (data.expires_in ?? 3600) * 1000;
 		this.plugin.settings.tokenExpiry = Date.now() + expiresInMs;
+		this.plugin.settings.needsReauthentication = false;
 
 		// Only persist the refresh token (long-lived) — never store the access token
 		if (data.refresh_token) {
 			this.plugin.settings.refreshToken = data.refresh_token;
 		}
 
+		this.clearReauthenticateNotice();
 		await this.plugin.saveSettings();
 		this.scheduleProactiveRefresh(expiresInMs);
 	}
@@ -307,6 +345,85 @@ export class GoogleAuthManager {
 	/** Cleanup — call from plugin onunload. */
 	destroy(): void {
 		this.clearRefreshTimer();
+		this.clearReauthenticateNotice();
+		this.clearSessionMobileAuthData();
+		this.rejectMobileAuthWaiter(new Error('Authentication was interrupted.'));
+	}
+
+	/** Refresh token after a 401 response and return the new access token. */
+	async refreshAfterUnauthorized(): Promise<string> {
+		await this.refreshAccessToken();
+		return this.accessToken;
+	}
+
+	private showReauthenticateNotice(): void {
+		this.clearReauthenticateNotice();
+		this.reauthNotice = new Notice(
+			'Google account access expired. Open settings and select re-authenticate.',
+			0
+		);
+	}
+
+	private clearReauthenticateNotice(): void {
+		this.reauthNotice?.hide();
+		this.reauthNotice = null;
+	}
+
+	private async savePendingMobileAuthData(state: string, codeVerifier: string): Promise<void> {
+		this.plugin.settings.pendingOAuthState = state;
+		this.plugin.settings.pendingCodeVerifier = codeVerifier;
+		await this.plugin.saveSettings();
+		sessionStorage.setItem(SESSION_OAUTH_STATE_KEY, state);
+		sessionStorage.setItem(SESSION_CODE_VERIFIER_KEY, codeVerifier);
+	}
+
+	private getPendingMobileAuthData(): { state: string; codeVerifier: string } {
+		const state = this.plugin.settings.pendingOAuthState || sessionStorage.getItem(SESSION_OAUTH_STATE_KEY) || '';
+		const codeVerifier = this.plugin.settings.pendingCodeVerifier || sessionStorage.getItem(SESSION_CODE_VERIFIER_KEY) || '';
+		return { state, codeVerifier };
+	}
+
+	private async clearPendingMobileAuthData(): Promise<void> {
+		const hadPendingData = !!this.plugin.settings.pendingOAuthState || !!this.plugin.settings.pendingCodeVerifier;
+		this.plugin.settings.pendingOAuthState = '';
+		this.plugin.settings.pendingCodeVerifier = '';
+		this.clearSessionMobileAuthData();
+		if (hadPendingData) {
+			await this.plugin.saveSettings();
+		}
+	}
+
+	private clearSessionMobileAuthData(): void {
+		sessionStorage.removeItem(SESSION_OAUTH_STATE_KEY);
+		sessionStorage.removeItem(SESSION_CODE_VERIFIER_KEY);
+	}
+
+	private waitForMobileCallback(): Promise<void> {
+		this.rejectMobileAuthWaiter(new Error('Authentication was restarted.'));
+		return new Promise((resolve, reject) => {
+			const timeoutId = setTimeout(() => {
+				this.mobileAuthWaiter = null;
+				void this.clearPendingMobileAuthData();
+				reject(new Error('OAuth callback timed out after 5 minutes'));
+			}, MOBILE_AUTH_TIMEOUT_MS);
+			this.mobileAuthWaiter = { resolve, reject, timeoutId };
+		});
+	}
+
+	private resolveMobileAuthWaiter(): void {
+		if (!this.mobileAuthWaiter) return;
+		const waiter = this.mobileAuthWaiter;
+		this.mobileAuthWaiter = null;
+		clearTimeout(waiter.timeoutId);
+		waiter.resolve();
+	}
+
+	private rejectMobileAuthWaiter(error: Error): void {
+		if (!this.mobileAuthWaiter) return;
+		const waiter = this.mobileAuthWaiter;
+		this.mobileAuthWaiter = null;
+		clearTimeout(waiter.timeoutId);
+		waiter.reject(error);
 	}
 
 	// ── User info ─────────────────────────────────────────────────────

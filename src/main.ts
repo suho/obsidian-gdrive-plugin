@@ -26,6 +26,23 @@ export default class GDriveSyncPlugin extends Plugin {
 
 		// Initialize core services
 		this.authManager = new GoogleAuthManager(this);
+
+		// Register URI handler for mobile OAuth callback as early as possible
+		// to avoid missing deep links during startup/resume.
+		this.registerObsidianProtocolHandler('gdrive-callback', async (params) => {
+			const searchParams = new URLSearchParams();
+			for (const [key, value] of Object.entries(params)) {
+				searchParams.append(key, value);
+			}
+			try {
+				await this.authManager.handleMobileCallback(searchParams);
+				new Notice('Google account connected successfully.');
+				this.refreshSettingTab();
+			} catch (err) {
+				new Notice(`Authentication failed: ${err instanceof Error ? err.message : String(err)}`);
+			}
+		});
+
 		this.driveClient = new DriveClient(this.authManager);
 		this.statusBar = new SyncStatusBar(this);
 		this.syncManager = new SyncManager(this, this.driveClient, this.statusBar);
@@ -39,22 +56,6 @@ export default class GDriveSyncPlugin extends Plugin {
 		// Settings tab
 		this.settingTab = new GDriveSettingTab(this.app, this);
 		this.addSettingTab(this.settingTab);
-
-		// Register URI handler for mobile OAuth callback: obsidian://gdrive-callback
-		this.registerObsidianProtocolHandler('gdrive-callback', async (params) => {
-			const searchParams = new URLSearchParams(
-				Object.entries(params)
-					.map(([k, v]) => `${k}=${encodeURIComponent(v)}`)
-					.join('&')
-			);
-			try {
-				await this.authManager.handleMobileCallback(searchParams);
-				new Notice('Google account connected successfully.');
-				this.refreshSettingTab();
-			} catch (err) {
-				new Notice(`Authentication failed: ${err instanceof Error ? err.message : String(err)}`);
-			}
-		});
 
 		// Commands
 		this.addCommand({
