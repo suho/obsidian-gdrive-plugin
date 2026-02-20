@@ -110,25 +110,32 @@ export class GDriveSettingTab extends PluginSettingTab {
 		// ── Account ──────────────────────────────────────────────────
 		new Setting(containerEl).setName('Account').setHeading();
 		if (this.plugin.settings.needsReauthentication) {
-			new Setting(containerEl)
-				.setName('Re-authentication required')
-				.setDesc('Google account access expired. Select re-authenticate to resume sync.')
-				.addButton(btn =>
-					btn
-						.setButtonText('Re-authenticate')
-						.setCta()
-						.onClick(() => {
-							this.plugin.openSetupWizard();
-						})
-				);
+			if (Platform.isMobile) {
+				new Setting(containerEl)
+					.setName('Re-authentication required')
+					.setDesc('Google account access expired. Paste a new refresh token below to resume sync.');
+			} else {
+				new Setting(containerEl)
+					.setName('Re-authentication required')
+					.setDesc('Google account access expired. Select re-authenticate to resume sync.')
+					.addButton(btn =>
+						btn
+							.setButtonText('Re-authenticate')
+							.setCta()
+							.onClick(() => {
+								this.plugin.openSetupWizard();
+							})
+					);
+			}
 		}
 
 		const isConnected = !!this.plugin.settings.refreshToken;
+		const vaultFolderPath = this.plugin.settings.setupComplete && this.plugin.settings.gDriveFolderName
+			? `My Drive/Obsidian Vaults/${this.plugin.settings.gDriveFolderName}`
+			: 'Not set up yet';
+
 		if (isConnected) {
 			const accountLabel = this.plugin.settings.connectedEmail || 'Connected (email unavailable)';
-			const vaultFolderPath = this.plugin.settings.setupComplete && this.plugin.settings.gDriveFolderName
-				? `My Drive/Obsidian Vaults/${this.plugin.settings.gDriveFolderName}`
-				: 'Not set up yet';
 
 			new Setting(containerEl)
 				.setName('Google account')
@@ -143,11 +150,19 @@ export class GDriveSettingTab extends PluginSettingTab {
 								this.display();
 							})();
 						})
-				);
+					);
 
 			new Setting(containerEl)
 				.setName('Vault folder path')
-				.setDesc(vaultFolderPath);
+				.setDesc(vaultFolderPath)
+				.addButton(btn =>
+					btn
+						.setButtonText(this.plugin.settings.setupComplete ? 'Change folder' : 'Choose folder')
+						.setCta()
+						.onClick(() => {
+							this.plugin.openSetupWizard();
+						})
+				);
 
 			new Setting(containerEl)
 				.setName('Refresh token')
@@ -155,6 +170,7 @@ export class GDriveSettingTab extends PluginSettingTab {
 				.addTextArea(text => {
 					text.setValue(this.plugin.settings.refreshToken);
 					text.inputEl.readOnly = true;
+					text.inputEl.rows = 3;
 				})
 				.addButton(btn =>
 					btn.setButtonText('Copy').onClick(() => {
@@ -162,12 +178,16 @@ export class GDriveSettingTab extends PluginSettingTab {
 							await this.copyToClipboard(this.plugin.settings.refreshToken);
 						})();
 					})
-				);
+					);
 		} else {
 			if (Platform.isMobile) {
 				new Setting(containerEl)
 					.setName('Google account')
-					.setDesc('Not connected. Add a refresh token below to connect this device.');
+					.setDesc('Not connected. Paste a refresh token from your desktop app to connect this device.');
+
+				new Setting(containerEl)
+					.setName('Vault folder path')
+					.setDesc(vaultFolderPath);
 			} else {
 				new Setting(containerEl)
 					.setName('Google account')
@@ -186,18 +206,25 @@ export class GDriveSettingTab extends PluginSettingTab {
 		if (Platform.isMobile) {
 			let importedRefreshToken = '';
 			new Setting(containerEl)
-				.setName('Add refresh token')
-				.setDesc('Paste a refresh token copied from your macOS app.')
-				.addTextArea(text =>
+				.setName(isConnected ? 'Replace refresh token' : 'Add refresh token')
+				.setDesc(
+					isConnected
+						? 'Paste a new refresh token to replace the current one on this device.'
+						: 'Paste a refresh token copied from your desktop app.'
+				)
+				.addTextArea(text => {
 					text
 						.setPlaceholder('Paste refresh token')
+						.setValue('')
 						.onChange(value => {
 							importedRefreshToken = value;
-						})
-				)
+						});
+					// Keep this compact on mobile while allowing full token paste.
+					text.inputEl.rows = 3;
+				})
 				.addButton(btn =>
 					btn
-						.setButtonText('Connect')
+						.setButtonText(isConnected ? 'Update token' : 'Connect')
 						.setCta()
 						.onClick(() => {
 							void (async () => {
@@ -207,12 +234,21 @@ export class GDriveSettingTab extends PluginSettingTab {
 									return;
 								}
 
+								btn.setDisabled(true);
+								btn.setButtonText(isConnected ? 'Updating...' : 'Connecting...');
+
 								try {
 									await this.plugin.authManager.importRefreshToken(token);
+									const needsFolderSetup = !this.plugin.settings.setupComplete;
 									const connectedEmail = this.plugin.settings.connectedEmail;
 									new Notice(connectedEmail ? `Connected as ${connectedEmail}` : 'Google account connected.');
 									this.display();
+									if (needsFolderSetup) {
+										this.plugin.openSetupWizard();
+									}
 								} catch (err) {
+									btn.setDisabled(false);
+									btn.setButtonText(isConnected ? 'Update token' : 'Connect');
 									new Notice(`Failed to connect: ${err instanceof Error ? err.message : String(err)}`, 10000);
 								}
 							})();

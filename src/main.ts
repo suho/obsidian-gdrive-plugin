@@ -1,4 +1,4 @@
-import { Notice, Plugin } from 'obsidian';
+import { Notice, Platform, Plugin } from 'obsidian';
 import { DEFAULT_SETTINGS, GDrivePluginSettings, GDriveSettingTab } from './settings';
 import { GoogleAuthManager } from './auth/GoogleAuthManager';
 import { DriveClient } from './gdrive/DriveClient';
@@ -64,11 +64,13 @@ export default class GDriveSyncPlugin extends Plugin {
 			callback: () => { void this.syncNow(); },
 		});
 
-		this.addCommand({
-			id: 'authenticate',
-			name: 'Connect to Google Drive',
-			callback: () => { this.openSetupWizard(); },
-		});
+		if (!Platform.isMobile) {
+			this.addCommand({
+				id: 'authenticate',
+				name: 'Connect to Google Drive',
+				callback: () => { this.openSetupWizard(); },
+			});
+		}
 
 		this.addCommand({
 			id: 'pause-sync',
@@ -99,10 +101,7 @@ export default class GDriveSyncPlugin extends Plugin {
 			id: 'open-settings',
 			name: 'Open settings',
 			callback: () => {
-				// @ts-ignore — Obsidian's internal setting open API
-				(this.app as unknown as { setting: { open: () => void; openTabById: (id: string) => void } }).setting.open();
-				// @ts-ignore
-				(this.app as unknown as { setting: { open: () => void; openTabById: (id: string) => void } }).setting.openTabById('gdrive-sync');
+				this.openPluginSettings();
 			},
 		});
 
@@ -110,6 +109,9 @@ export default class GDriveSyncPlugin extends Plugin {
 		if (!this.settings.setupComplete) {
 			// Defer until workspace is ready
 			this.app.workspace.onLayoutReady(() => {
+				if (Platform.isMobile && !this.settings.refreshToken) {
+					return;
+				}
 				this.openSetupWizard();
 			});
 		} else if (this.settings.syncOnStartup) {
@@ -136,13 +138,30 @@ export default class GDriveSyncPlugin extends Plugin {
 	// ── Public methods called by UI components ────────────────────────
 
 	openSetupWizard(): void {
+		if (Platform.isMobile && !this.settings.refreshToken) {
+			new Notice('Add a refresh token in plugin settings to connect on mobile.');
+			this.openPluginSettings();
+			return;
+		}
 		new SetupWizard(this.app, this).open();
+	}
+
+	openPluginSettings(): void {
+		// @ts-ignore — Obsidian's internal setting open API
+		(this.app as unknown as { setting: { open: () => void; openTabById: (id: string) => void } }).setting.open();
+		// @ts-ignore
+		(this.app as unknown as { setting: { open: () => void; openTabById: (id: string) => void } }).setting.openTabById('gdrive-sync');
 	}
 
 	async syncNow(): Promise<void> {
 		if (!this.settings.setupComplete) {
-			new Notice('Complete Google Drive setup first.');
-			this.openSetupWizard();
+			if (Platform.isMobile && !this.settings.refreshToken) {
+				new Notice('Add a refresh token in plugin settings first.');
+				this.openPluginSettings();
+			} else {
+				new Notice('Complete Google Drive setup first.');
+				this.openSetupWizard();
+			}
 			return;
 		}
 

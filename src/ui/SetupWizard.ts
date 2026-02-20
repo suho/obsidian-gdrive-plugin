@@ -1,4 +1,4 @@
-import { App, Modal, Notice, Setting } from 'obsidian';
+import { App, Modal, Notice, Platform, Setting } from 'obsidian';
 import type GDriveSyncPlugin from '../main';
 import type { DriveFileMetadata } from '../types';
 
@@ -34,6 +34,7 @@ export class SetupWizard extends Modal {
 	}
 
 	onOpen(): void {
+		this.step = this.plugin.authManager.isAuthenticated ? 'folder' : 'authenticate';
 		this.titleEl.setText('Set up Google Drive sync');
 		this.renderStep();
 	}
@@ -61,21 +62,28 @@ export class SetupWizard extends Modal {
 	// ── Step 1: Authenticate ──────────────────────────────────────────
 
 	private renderAuthStep(): void {
-		this.titleEl.setText('Connect to Google Drive');
+		this.titleEl.setText(Platform.isMobile ? 'Connect account' : 'Connect to Google Drive');
 
 		const desc = this.contentEl.createEl('p');
-		desc.setText(
-			'Google Drive Sync will upload your vault files to Google Drive. ' +
-			'Only files created by this plugin will be accessible — ' +
-			'files added to Google Drive through other apps will not be visible to this plugin.'
-		);
+		if (Platform.isMobile) {
+			desc.setText(
+				'On mobile, connect by importing a refresh token from your desktop app. ' +
+				'After importing, return here to continue folder setup.'
+			);
+		} else {
+			desc.setText(
+				'Google Drive Sync will upload your vault files to Google Drive. ' +
+				'Only files created by this plugin will be accessible — ' +
+				'files added to Google Drive through other apps will not be visible to this plugin.'
+			);
 
-		const notice = this.contentEl.createEl('p');
-		notice.addClass('gdrive-sync-notice');
-		notice.setText(
-			'Your browser will open for Google sign-in. ' +
-			'After signing in, return to Obsidian to continue.'
-		);
+			const notice = this.contentEl.createEl('p');
+			notice.addClass('gdrive-sync-notice');
+			notice.setText(
+				'Your browser will open for Google sign-in. ' +
+				'After signing in, return to Obsidian to continue.'
+			);
+		}
 
 		// If already authenticated, skip straight to folder step
 		if (this.plugin.authManager.isAuthenticated) {
@@ -101,6 +109,22 @@ export class SetupWizard extends Modal {
 							this.renderStep();
 						})
 					);
+			return;
+		}
+
+		if (Platform.isMobile) {
+			new Setting(this.contentEl)
+				.setName('Connect on mobile')
+				.setDesc('Open plugin settings and paste a refresh token in add refresh token.')
+				.addButton(btn =>
+					btn
+						.setButtonText('Open settings')
+						.setCta()
+						.onClick(() => {
+							this.plugin.openPluginSettings();
+							this.close();
+						})
+				);
 			return;
 		}
 
