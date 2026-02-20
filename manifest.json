@@ -1,7 +1,7 @@
 {
 	"id": "gdrive-sync",
 	"name": "Google Drive Sync",
-	"version": "0.7.0",
+	"version": "0.8.0",
 	"minAppVersion": "0.15.0",
 	"description": "Sync your Obsidian vault with Google Drive.",
 	"author": "Su Ho",

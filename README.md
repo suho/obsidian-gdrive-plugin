@@ -35,7 +35,7 @@ Current implementation status from `TASKS.md`:
 - Upload flow for create, update, rename, delete
 - Download flow with active-file protection and deferred apply
 - Sync state database with recovery fallback
-- Selective sync toggles and conflict strategy settings UI
+- Conflict strategy settings UI
 
 ### Planned or partially implemented
 
@@ -50,7 +50,6 @@ Current implementation status from `TASKS.md`:
 - The plugin uses Google Drive scope `drive.file`.
 - This means it can access only files created by this plugin.
 - Files added manually in Google Drive web/app are not guaranteed to be visible to this plugin.
-- Selective sync settings are device-local and do not sync across devices.
 
 ## Install on desktop app
 
