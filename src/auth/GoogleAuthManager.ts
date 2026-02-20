@@ -157,7 +157,9 @@ export class GoogleAuthManager {
 		codeChallenge: string,
 		state: string
 	): Promise<void> {
-		const authUrl = this.buildAuthUrl(codeChallenge, state, MOBILE_REDIRECT_URI);
+		const authUrl = this.buildAuthUrl(codeChallenge, state, MOBILE_REDIRECT_URI, {
+			forceAccountChooser: true,
+		});
 		await this.savePendingMobileAuthData(state, codeVerifier);
 		const waitForCallback = this.waitForMobileCallback();
 
@@ -466,7 +468,17 @@ export class GoogleAuthManager {
 		return base64UrlEncode(array);
 	}
 
-	private buildAuthUrl(codeChallenge: string, state: string, redirectUri: string): string {
+	private buildAuthUrl(
+		codeChallenge: string,
+		state: string,
+		redirectUri: string,
+		options?: { forceAccountChooser?: boolean }
+	): string {
+		const promptValues = ['consent'];
+		if (options?.forceAccountChooser) {
+			promptValues.unshift('select_account');
+		}
+
 		const params = new URLSearchParams({
 			client_id: this.clientId,
 			redirect_uri: redirectUri,
@@ -476,7 +488,7 @@ export class GoogleAuthManager {
 			code_challenge: codeChallenge,
 			code_challenge_method: 'S256',
 			access_type: 'offline',
-			prompt: 'consent', // Force refresh token to be returned
+			prompt: promptValues.join(' '), // Keep refresh token behavior and optionally force account selection
 		});
 		return `${AUTH_ENDPOINT}?${params.toString()}`;
 	}
