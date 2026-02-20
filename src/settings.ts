@@ -1,4 +1,4 @@
-import { App, Platform, PluginSettingTab, Setting } from 'obsidian';
+import { App, Notice, Platform, PluginSettingTab, Setting } from 'obsidian';
 import type GDriveSyncPlugin from './main';
 
 export interface GDrivePluginSettings {
@@ -148,16 +148,74 @@ export class GDriveSettingTab extends PluginSettingTab {
 			new Setting(containerEl)
 				.setName('Vault folder path')
 				.setDesc(vaultFolderPath);
-		} else {
+
 			new Setting(containerEl)
-				.setName('Google account')
-				.setDesc('Not connected')
+				.setName('Refresh token')
+				.setDesc('Copy this token to connect mobile devices without browser sign-in.')
+				.addTextArea(text => {
+					text.setValue(this.plugin.settings.refreshToken);
+					text.inputEl.readOnly = true;
+				})
+				.addButton(btn =>
+					btn.setButtonText('Copy').onClick(() => {
+						void (async () => {
+							await this.copyToClipboard(this.plugin.settings.refreshToken);
+						})();
+					})
+				);
+		} else {
+			if (Platform.isMobile) {
+				new Setting(containerEl)
+					.setName('Google account')
+					.setDesc('Not connected. Add a refresh token below to connect this device.');
+			} else {
+				new Setting(containerEl)
+					.setName('Google account')
+					.setDesc('Not connected')
+					.addButton(btn =>
+						btn
+							.setButtonText('Connect to Google Drive')
+							.setCta()
+							.onClick(() => {
+								this.plugin.openSetupWizard();
+							})
+					);
+			}
+		}
+
+		if (Platform.isMobile) {
+			let importedRefreshToken = '';
+			new Setting(containerEl)
+				.setName('Add refresh token')
+				.setDesc('Paste a refresh token copied from your macOS app.')
+				.addTextArea(text =>
+					text
+						.setPlaceholder('Paste refresh token')
+						.onChange(value => {
+							importedRefreshToken = value;
+						})
+				)
 				.addButton(btn =>
 					btn
-						.setButtonText('Connect to Google Drive')
+						.setButtonText('Connect')
 						.setCta()
 						.onClick(() => {
-							this.plugin.openSetupWizard();
+							void (async () => {
+								const token = importedRefreshToken.trim();
+								if (!token) {
+									new Notice('Paste a refresh token first.');
+									return;
+								}
+
+								try {
+									await this.plugin.authManager.importRefreshToken(token);
+									const connectedEmail = this.plugin.settings.connectedEmail;
+									new Notice(connectedEmail ? `Connected as ${connectedEmail}` : 'Google account connected.');
+									this.display();
+								} catch (err) {
+									new Notice(`Failed to connect: ${err instanceof Error ? err.message : String(err)}`, 10000);
+								}
+							})();
 						})
 				);
 		}
@@ -440,5 +498,19 @@ export class GDriveSettingTab extends PluginSettingTab {
 						this.plugin.resetSyncState();
 					})
 			);
+	}
+
+	private async copyToClipboard(value: string): Promise<void> {
+		if (!value) {
+			new Notice('No refresh token available.');
+			return;
+		}
+
+		try {
+			await navigator.clipboard.writeText(value);
+			new Notice('Refresh token copied.');
+		} catch {
+			new Notice('Copy failed. Select the token and copy it manually.');
+		}
 	}
 }

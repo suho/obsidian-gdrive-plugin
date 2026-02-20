@@ -122,6 +122,41 @@ export class GoogleAuthManager {
 		this.plugin.refreshSettingTab();
 	}
 
+	/** Import a refresh token from another device and initialize session state. */
+	async importRefreshToken(refreshToken: string): Promise<void> {
+		if (!this.clientId || !this.clientSecret) {
+			throw new Error(
+				'Google OAuth client credentials are not configured. ' +
+				'Set GDRIVE_CLIENT_ID and GDRIVE_CLIENT_SECRET at build time.'
+			);
+		}
+
+		const normalizedToken = refreshToken.trim();
+		if (!normalizedToken) {
+			throw new Error('Enter a refresh token first.');
+		}
+
+		const response = await this.requestRefreshGrant(normalizedToken);
+
+		if (response.status === 400 || response.status === 401) {
+			const data = response.json as { error?: string };
+			if (data.error === 'invalid_grant') {
+				throw new AuthError('Invalid refresh token. Paste the full token and try again.');
+			}
+		}
+
+		if (response.status !== 200) {
+			throw new AuthError(`Token refresh failed (${response.status}): ${response.text}`);
+		}
+
+		this.plugin.settings.refreshToken = normalizedToken;
+		this.plugin.settings.needsReauthentication = false;
+		const data = response.json as TokenResponse;
+		await this.storeTokens(data);
+		await this.fetchAndStoreEmail();
+		this.plugin.refreshSettingTab();
+	}
+
 	// ── Desktop flow ──────────────────────────────────────────────────
 
 	private async authenticateDesktop(
@@ -251,17 +286,7 @@ export class GoogleAuthManager {
 
 		let response;
 		try {
-			response = await requestUrl({
-				url: TOKEN_ENDPOINT,
-				method: 'POST',
-				headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-				body: new URLSearchParams({
-					grant_type: 'refresh_token',
-					refresh_token: this.plugin.settings.refreshToken,
-					client_id: this.clientId,
-					client_secret: this.clientSecret,
-				}).toString(),
-			});
+			response = await this.requestRefreshGrant(this.plugin.settings.refreshToken);
 		} catch {
 			throw new AuthError('Network error during token refresh');
 		}
@@ -290,6 +315,20 @@ export class GoogleAuthManager {
 
 		const data = response.json as TokenResponse;
 		await this.storeTokens(data);
+	}
+
+	private async requestRefreshGrant(refreshToken: string): Promise<Awaited<ReturnType<typeof requestUrl>>> {
+		return requestUrl({
+			url: TOKEN_ENDPOINT,
+			method: 'POST',
+			headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+			body: new URLSearchParams({
+				grant_type: 'refresh_token',
+				refresh_token: refreshToken,
+				client_id: this.clientId,
+				client_secret: this.clientSecret,
+			}).toString(),
+		});
 	}
 
 	private async storeTokens(data: TokenResponse): Promise<void> {
