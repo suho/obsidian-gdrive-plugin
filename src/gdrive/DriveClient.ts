@@ -290,6 +290,35 @@ export class DriveClient {
 		return results;
 	}
 
+	/**
+	 * Recursively list all non-folder files under a folder.
+	 * Includes files in nested subfolders.
+	 */
+	async listAllFilesRecursive(rootFolderId: string): Promise<DriveFileMetadata[]> {
+		const fileResults: DriveFileMetadata[] = [];
+		const folderQueue: string[] = [rootFolderId];
+		const visitedFolders = new Set<string>();
+
+		while (folderQueue.length > 0) {
+			const currentFolderId = folderQueue.shift();
+			if (!currentFolderId || visitedFolders.has(currentFolderId)) {
+				continue;
+			}
+			visitedFolders.add(currentFolderId);
+
+			const children = await this.listAllFiles(currentFolderId);
+			for (const child of children) {
+				if (child.mimeType === 'application/vnd.google-apps.folder') {
+					folderQueue.push(child.id);
+					continue;
+				}
+				fileResults.push(child);
+			}
+		}
+
+		return fileResults;
+	}
+
 	/** Backward-compatible alias used by the Phase 1 API checklist. */
 	async listFiles(folderId: string, pageToken?: string, pageSize = 1000): Promise<DriveFileMetadata[]> {
 		const q = `'${folderId}' in parents and trashed=false`;

@@ -308,8 +308,15 @@ export class SetupWizard extends Modal {
 		this.plugin.settings.gDriveFolderId = folderId;
 		this.plugin.settings.gDriveFolderName = folderName;
 		this.plugin.settings.setupComplete = true;
+		this.plugin.settings.lastSyncPageToken = '';
+		await this.resetSyncDatabase();
 		await this.plugin.saveSettings();
 		this.plugin.refreshSettingTab();
+	}
+
+	private async resetSyncDatabase(): Promise<void> {
+		this.plugin.syncManager.syncDb.reset();
+		await this.plugin.syncManager.syncDb.save();
 	}
 
 	private async ensureRootFolderId(): Promise<string> {

@@ -14,7 +14,11 @@ export class ChangeTracker {
 	}
 
 	async listChangesSinceLastSync(): Promise<DriveChange[]> {
-		const startToken = await this.ensureStartPageToken();
+		if (!this.plugin.settings.lastSyncPageToken) {
+			return this.bootstrapInitialPull();
+		}
+
+		const startToken = this.plugin.settings.lastSyncPageToken;
 		if (!startToken) return [];
 
 		const allChanges: DriveChange[] = [];
@@ -58,15 +62,24 @@ export class ChangeTracker {
 		return this.driveClient.listChanges(pageToken);
 	}
 
-	private async ensureStartPageToken(): Promise<string> {
-		if (this.plugin.settings.lastSyncPageToken) {
-			return this.plugin.settings.lastSyncPageToken;
+	private async bootstrapInitialPull(): Promise<DriveChange[]> {
+		if (!this.plugin.settings.gDriveFolderId) {
+			return [];
 		}
 
-		const token = await this.driveClient.getStartPageToken();
-		this.plugin.settings.lastSyncPageToken = token;
+		// Capture the current changes token first, then perform a full folder scan.
+		// Subsequent sync runs continue incrementally from this token.
+		const startToken = await this.driveClient.getStartPageToken();
+		const initialFiles = await this.driveClient.listAllFilesRecursive(this.plugin.settings.gDriveFolderId);
+
+		this.plugin.settings.lastSyncPageToken = startToken;
 		await this.plugin.saveSettings();
-		return token;
+
+		return initialFiles.map(file => ({
+			fileId: file.id,
+			removed: false,
+			file,
+		}));
 	}
 
 	private async isRelevantChange(change: DriveChange): Promise<boolean> {

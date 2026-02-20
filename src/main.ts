@@ -204,7 +204,9 @@ export default class GDriveSyncPlugin extends Plugin {
 		void (async () => {
 			this.syncManager.syncDb.reset();
 			await this.syncManager.syncDb.save();
-			new Notice('Sync state was reset. The next sync will rebuild state from local files.');
+			this.settings.lastSyncPageToken = '';
+			await this.saveSettings();
+			new Notice('Sync state was reset. The next sync will rebuild state from Google Drive and local files.');
 		})();
 	}
 }

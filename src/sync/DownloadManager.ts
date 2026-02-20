@@ -1,6 +1,7 @@
 import { Notice, TFile, normalizePath } from 'obsidian';
 import type GDriveSyncPlugin from '../main';
 import type { DriveClient, DriveChange } from '../gdrive/DriveClient';
+import type { DriveFileMetadata } from '../types';
 import { computeContentHash } from '../utils/checksums';
 import type { SyncDatabase } from './SyncDatabase';
 
@@ -14,6 +15,7 @@ interface PendingDownload {
 export class DownloadManager {
 	private readonly pendingDownloads = new Map<string, PendingDownload>();
 	private readonly trashDir: string;
+	private readonly folderPathCache = new Map<string, string | null>();
 
 	constructor(
 		private readonly plugin: GDriveSyncPlugin,
@@ -21,6 +23,9 @@ export class DownloadManager {
 		private readonly syncDb: SyncDatabase
 	) {
 		this.trashDir = normalizePath(`${this.plugin.app.vault.configDir}/plugins/${this.plugin.manifest.id}/trash`);
+		if (this.plugin.settings.gDriveFolderId) {
+			this.folderPathCache.set(this.plugin.settings.gDriveFolderId, '');
+		}
 	}
 
 	registerHandlers(): void {
@@ -43,7 +48,7 @@ export class DownloadManager {
 		if (remoteFile.mimeType === 'application/vnd.google-apps.folder') return 'skipped';
 
 		const existing = this.syncDb.getByGDriveId(change.fileId);
-		let localPath = existing?.localPath ?? this.resolveNewLocalPath(remoteFile.name);
+		let localPath = existing?.localPath ?? await this.resolveNewLocalPath(remoteFile);
 
 		const renamedPath = existing ? this.resolveRenamePath(existing.localPath, remoteFile.name) : null;
 		if (existing && renamedPath && renamedPath !== existing.localPath) {
@@ -131,16 +136,71 @@ export class DownloadManager {
 		return normalizePath(segments.join('/'));
 	}
 
-	private resolveNewLocalPath(remoteName: string): string {
-		const normalizedName = normalizePath(remoteName);
-		if (!this.plugin.app.vault.getAbstractFileByPath(normalizedName)) {
-			return normalizedName;
+	private async resolveNewLocalPath(remoteFile: DriveFileMetadata): Promise<string> {
+		const preferredPath = await this.resolvePreferredLocalPath(remoteFile);
+		if (!this.plugin.app.vault.getAbstractFileByPath(preferredPath)) {
+			return preferredPath;
 		}
 
-		const dot = normalizedName.lastIndexOf('.');
-		const base = dot >= 0 ? normalizedName.slice(0, dot) : normalizedName;
-		const ext = dot >= 0 ? normalizedName.slice(dot) : '';
+		const dot = preferredPath.lastIndexOf('.');
+		const base = dot >= 0 ? preferredPath.slice(0, dot) : preferredPath;
+		const ext = dot >= 0 ? preferredPath.slice(dot) : '';
 		return normalizePath(`${base}.remote${ext}`);
+	}
+
+	private async resolvePreferredLocalPath(remoteFile: DriveFileMetadata): Promise<string> {
+		const remoteName = normalizePath(remoteFile.name);
+		const parentId = remoteFile.parents?.[0];
+		if (!parentId) {
+			return remoteName;
+		}
+
+		const parentPath = await this.resolveFolderPathFromVaultRoot(parentId, new Set<string>());
+		if (parentPath === null || parentPath === '') {
+			return remoteName;
+		}
+		return normalizePath(`${parentPath}/${remoteName}`);
+	}
+
+	private async resolveFolderPathFromVaultRoot(folderId: string, visited: Set<string>): Promise<string | null> {
+		if (folderId === this.plugin.settings.gDriveFolderId) {
+			return '';
+		}
+
+		if (visited.has(folderId)) {
+			return null;
+		}
+		visited.add(folderId);
+
+		if (this.folderPathCache.has(folderId)) {
+			return this.folderPathCache.get(folderId) ?? null;
+		}
+
+		try {
+			const metadata = await this.driveClient.getFileMetadata(folderId, 'id,name,mimeType,parents');
+			if (metadata.mimeType !== 'application/vnd.google-apps.folder') {
+				this.folderPathCache.set(folderId, null);
+				return null;
+			}
+
+			const parents = metadata.parents ?? [];
+			for (const parentId of parents) {
+				const parentPath = await this.resolveFolderPathFromVaultRoot(parentId, visited);
+				if (parentPath === null) {
+					continue;
+				}
+
+				const fullPath = parentPath ? normalizePath(`${parentPath}/${metadata.name}`) : normalizePath(metadata.name);
+				this.folderPathCache.set(folderId, fullPath);
+				return fullPath;
+			}
+		} catch {
+			this.folderPathCache.set(folderId, null);
+			return null;
+		}
+
+		this.folderPathCache.set(folderId, null);
+		return null;
 	}
 
 	private async renameLocalFile(oldPath: string, newPath: string): Promise<void> {
