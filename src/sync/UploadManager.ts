@@ -324,6 +324,11 @@ export class UploadManager {
 	}
 
 	private isPathExcluded(path: string): boolean {
-		return isExcluded(path);
+		return isExcluded(
+			path,
+			this.plugin.settings.excludedPaths,
+			this.plugin.settings,
+			this.plugin.app.vault.configDir
+		);
 	}
 }

@@ -2,15 +2,13 @@
 
 Sync your Obsidian vault with Google Drive using the Google Drive API.
 
-Plugin ID: `gdrive-sync`  
-Current manifest version: `0.5.0`  
-Desktop and mobile supported (`isDesktopOnly: false`).
-
 ## What this plugin does
 
 - Connects your Google account with OAuth 2.0 (PKCE)
 - Creates or links a vault folder under `My Drive/Obsidian Vaults/...`
 - Syncs changes between local vault files and Google Drive
+- Supports selective sync by file type (images, audio, video, PDF files, other types)
+- Supports granular vault configuration sync for selected `.obsidian` files
 - Supports manual sync, pause sync, and resume sync commands
 - Shows sync status in the status bar
 - Lets you copy a refresh token on desktop and import it on mobile
@@ -36,6 +34,8 @@ Current implementation status from `TASKS.md`:
 - Download flow with active-file protection and deferred apply
 - Sync state database with recovery fallback
 - Conflict strategy settings UI
+- Selective sync settings UI
+- Vault configuration sync settings UI
 
 ### Planned or partially implemented
 
@@ -50,6 +50,8 @@ Current implementation status from `TASKS.md`:
 - The plugin uses Google Drive scope `drive.file`.
 - This means it can access only files created by this plugin.
 - Files added manually in Google Drive web/app are not guaranteed to be visible to this plugin.
+- Selective sync settings are device-local and do not sync across devices.
+- The plugin does not sync all files in `.obsidian`; it syncs only enabled vault config files.
 
 ## Install on desktop app
 

@@ -4,6 +4,7 @@ import type { DriveClient, DriveChange } from '../gdrive/DriveClient';
 import type { DriveFileMetadata } from '../types';
 import { computeContentHash } from '../utils/checksums';
 import type { SyncDatabase } from './SyncDatabase';
+import { isExcluded } from './exclusions';
 
 export type DownloadResult = 'pulled' | 'deleted' | 'renamed' | 'deferred' | 'skipped';
 
@@ -51,6 +52,11 @@ export class DownloadManager {
 		let localPath = existing?.localPath ?? await this.resolveNewLocalPath(remoteFile);
 
 		const renamedPath = existing ? this.resolveRenamePath(existing.localPath, remoteFile.name) : null;
+		const targetPath = renamedPath ?? localPath;
+		if (this.isPathExcluded(targetPath)) {
+			return 'skipped';
+		}
+
 		if (existing && renamedPath && renamedPath !== existing.localPath) {
 			await this.renameLocalFile(existing.localPath, renamedPath);
 			this.syncDb.deleteRecord(existing.localPath);
@@ -109,6 +115,10 @@ export class DownloadManager {
 	private async handleRemoteDeletion(fileId: string): Promise<DownloadResult> {
 		const record = this.syncDb.getByGDriveId(fileId);
 		if (!record) return 'skipped';
+		if (this.isPathExcluded(record.localPath)) {
+			this.syncDb.deleteRecord(record.localPath);
+			return 'skipped';
+		}
 
 		if (this.isActiveFile(record.localPath)) {
 			this.pendingDownloads.set(fileId, {
@@ -234,5 +244,14 @@ export class DownloadManager {
 
 	private isActiveFile(path: string): boolean {
 		return this.plugin.app.workspace.getActiveFile()?.path === path;
+	}
+
+	private isPathExcluded(path: string): boolean {
+		return isExcluded(
+			path,
+			this.plugin.settings.excludedPaths,
+			this.plugin.settings,
+			this.plugin.app.vault.configDir
+		);
 	}
 }

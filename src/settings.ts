@@ -20,9 +20,23 @@ export interface GDrivePluginSettings {
 	wifiOnlySync: boolean;         // default: true on mobile, false on desktop
 	keepRevisionsForever: boolean; // default: true — set keepRevisionForever on .md uploads
 
+	// Selective sync (device-local — never propagated to other devices)
+	syncImages: boolean;
+	syncAudio: boolean;
+	syncVideo: boolean;
+	syncPdfs: boolean;
+	syncOtherTypes: boolean;
+	excludedPaths: string[];
+
 	// Conflict resolution
 	mdConflictStrategy: 'auto-merge' | 'conflict-file' | 'local-wins' | 'remote-wins';
 	binaryConflictStrategy: 'last-modified-wins' | 'conflict-file';
+
+	// Vault config sync
+	syncEditorSettings: boolean;
+	syncAppearance: boolean;
+	syncHotkeys: boolean;
+	syncCommunityPluginList: boolean;
 
 	// Internal state
 	setupComplete: boolean;        // false triggers the setup wizard on first load
@@ -52,9 +66,23 @@ export const DEFAULT_SETTINGS: GDrivePluginSettings = {
 	wifiOnlySync: Platform.isMobile,
 	keepRevisionsForever: true,
 
+	// Selective sync
+	syncImages: true,
+	syncAudio: true,
+	syncVideo: false,
+	syncPdfs: true,
+	syncOtherTypes: true,
+	excludedPaths: [],
+
 	// Conflict resolution
 	mdConflictStrategy: 'auto-merge',
 	binaryConflictStrategy: 'last-modified-wins',
+
+	// Vault config sync
+	syncEditorSettings: true,
+	syncAppearance: true,
+	syncHotkeys: false,
+	syncCommunityPluginList: false,
 
 	// Internal
 	setupComplete: false,
@@ -320,6 +348,105 @@ export class GDriveSettingTab extends PluginSettingTab {
 						this.plugin.settings.binaryConflictStrategy = val as GDrivePluginSettings['binaryConflictStrategy'];
 						await this.plugin.saveSettings();
 					})
+			);
+
+		// ── Selective sync ────────────────────────────────────────────
+		new Setting(containerEl).setName('Selective sync').setHeading();
+
+		new Setting(containerEl)
+			.setDesc('These settings apply to this device only.')
+			.setClass('gdrive-sync-notice');
+
+		new Setting(containerEl)
+			.setName('Sync images')
+			.setDesc('Includes common image file formats.')
+			.addToggle(t =>
+				t.setValue(this.plugin.settings.syncImages).onChange(async v => {
+					this.plugin.settings.syncImages = v;
+					await this.plugin.saveSettings();
+				})
+			);
+
+		new Setting(containerEl)
+			.setName('Sync audio')
+			.setDesc('Includes common audio formats such as mp3, wav, m4a, ogg, and flac.')
+			.addToggle(t =>
+				t.setValue(this.plugin.settings.syncAudio).onChange(async v => {
+					this.plugin.settings.syncAudio = v;
+					await this.plugin.saveSettings();
+				})
+			);
+
+		new Setting(containerEl)
+			.setName('Sync video')
+			.setDesc('Includes common video formats such as mp4, mov, mkv, and webm.')
+			.addToggle(t =>
+				t.setValue(this.plugin.settings.syncVideo).onChange(async v => {
+					this.plugin.settings.syncVideo = v;
+					await this.plugin.saveSettings();
+				})
+			);
+
+		new Setting(containerEl)
+			.setName('Sync PDF files')
+			.addToggle(t =>
+				t.setValue(this.plugin.settings.syncPdfs).onChange(async v => {
+					this.plugin.settings.syncPdfs = v;
+					await this.plugin.saveSettings();
+				})
+			);
+
+		new Setting(containerEl)
+			.setName('Sync other file types')
+			.setDesc('Includes canvas files, drawing files, and other file types.')
+			.addToggle(t =>
+				t.setValue(this.plugin.settings.syncOtherTypes).onChange(async v => {
+					this.plugin.settings.syncOtherTypes = v;
+					await this.plugin.saveSettings();
+				})
+			);
+
+		// ── Vault config sync ─────────────────────────────────────────
+		new Setting(containerEl).setName('Vault configuration sync').setHeading();
+
+		new Setting(containerEl)
+			.setName('Sync editor settings')
+			.setDesc('Sync app.json with editor, file, and link settings.')
+			.addToggle(t =>
+				t.setValue(this.plugin.settings.syncEditorSettings).onChange(async v => {
+					this.plugin.settings.syncEditorSettings = v;
+					await this.plugin.saveSettings();
+				})
+			);
+
+		new Setting(containerEl)
+			.setName('Sync appearance')
+			.setDesc('Sync appearance.json, themes, and CSS snippets.')
+			.addToggle(t =>
+				t.setValue(this.plugin.settings.syncAppearance).onChange(async v => {
+					this.plugin.settings.syncAppearance = v;
+					await this.plugin.saveSettings();
+				})
+			);
+
+		new Setting(containerEl)
+			.setName('Sync hotkeys')
+			.setDesc('Sync hotkeys.json.')
+			.addToggle(t =>
+				t.setValue(this.plugin.settings.syncHotkeys).onChange(async v => {
+					this.plugin.settings.syncHotkeys = v;
+					await this.plugin.saveSettings();
+				})
+			);
+
+		new Setting(containerEl)
+			.setName('Sync community plugin list')
+			.setDesc('Sync community-plugins.json only, not plugin binaries.')
+			.addToggle(t =>
+				t.setValue(this.plugin.settings.syncCommunityPluginList).onChange(async v => {
+					this.plugin.settings.syncCommunityPluginList = v;
+					await this.plugin.saveSettings();
+				})
 			);
 
 		// ── Version history ───────────────────────────────────────────
