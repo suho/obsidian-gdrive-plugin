@@ -87,12 +87,15 @@ function parseOfflineQueuePayload(raw: string): SyncQueueEntry[] {
 }
 
 export class SyncManager {
+	private static readonly FILE_OPEN_REFRESH_COOLDOWN_MS = 1500;
+
 	private syncLock = false;
 	private pushFlushInFlight = false;
 	private pullInFlight = false;
 	private replayInFlight = false;
 	private lastAutoPullAt = 0;
 	private isNetworkOffline = false;
+	private readonly lastFileOpenRefreshAt = new Map<string, number>();
 
 	private readonly modifyDebouncers = new Map<string, DebouncedFn<[]>>();
 	private pendingPushQueue: SyncQueueEntry[] = [];
@@ -256,6 +259,10 @@ export class SyncManager {
 				return;
 			}
 			this.handleFileRename(oldPath, file.path);
+		}));
+
+		this.plugin.registerEvent(this.plugin.app.workspace.on('file-open', file => {
+			void this.handleFileOpen(file);
 		}));
 	}
 
@@ -573,6 +580,46 @@ export class SyncManager {
 		}
 	}
 
+	private async handleFileOpen(file: TFile | null): Promise<void> {
+		if (!file || !this.plugin.settings.autoSync || this.plugin.settings.syncPaused) {
+			return;
+		}
+
+		const path = normalizePath(file.path);
+		if (this.isExcludedPath(path) || this.hasQueuedLocalChange(path)) {
+			return;
+		}
+
+		const now = Date.now();
+		const lastRefreshAt = this.lastFileOpenRefreshAt.get(path) ?? 0;
+		const shouldPullOnOpen = now - lastRefreshAt >= SyncManager.FILE_OPEN_REFRESH_COOLDOWN_MS;
+		this.lastFileOpenRefreshAt.set(path, now);
+
+		if (shouldPullOnOpen && !this.pullInFlight && !this.syncLock && !this.replayInFlight) {
+			const canSync = await this.refreshConnectivityState(false);
+			if (canSync) {
+				await this.runAutoPull();
+			}
+		}
+
+		if (this.hasQueuedLocalChange(path)) {
+			return;
+		}
+
+		if (this.pullInFlight || this.syncLock || this.replayInFlight || this.pushFlushInFlight) {
+			return;
+		}
+
+		const applied = await this.downloadManager.processPendingDownloadForPath(path, true);
+		if (applied) {
+			await this.syncDb.save();
+			this.statusBar.setSynced();
+			return;
+		}
+
+		this.updateStatusFromCurrentState();
+	}
+
 	private async replayOfflineQueue(): Promise<PushSummary> {
 		if (this.replayInFlight || this.offlineQueue.length === 0) {
 			return emptyPushSummary();
@@ -651,6 +698,27 @@ export class SyncManager {
 			this.plugin.settings,
 			this.plugin.app.vault.configDir
 		);
+	}
+
+	private hasQueuedLocalChange(path: string): boolean {
+		const normalizedPath = normalizePath(path);
+		if (this.modifyDebouncers.has(normalizedPath)) {
+			return true;
+		}
+
+		for (const entry of this.pendingPushQueue) {
+			if (entry.path === normalizedPath || entry.oldPath === normalizedPath) {
+				return true;
+			}
+		}
+
+		for (const entry of this.offlineQueue) {
+			if (entry.path === normalizedPath || entry.oldPath === normalizedPath) {
+				return true;
+			}
+		}
+
+		return false;
 	}
 
 	private cancelModifyDebouncer(path: string): void {

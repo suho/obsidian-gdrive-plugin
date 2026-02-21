@@ -122,6 +122,9 @@ export class UploadManager {
 		const localHash = await computeContentHash(content);
 		const existing = this.syncDb.getRecord(normalizedPath);
 		if (existing) {
+			if (existing.localHash === localHash) {
+				return 'skipped';
+			}
 			await this.pushExistingFile(normalizedPath, localHash);
 			return 'updated';
 		}

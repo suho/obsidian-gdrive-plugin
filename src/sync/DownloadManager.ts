@@ -13,6 +13,10 @@ interface PendingDownload {
 	targetPath: string;
 }
 
+interface ApplyChangeOptions {
+	allowActiveWrite?: boolean;
+}
+
 export class DownloadManager {
 	private readonly pendingDownloads = new Map<string, PendingDownload>();
 	private readonly trashDir: string;
@@ -39,9 +43,43 @@ export class DownloadManager {
 		return this.pendingDownloads.size;
 	}
 
-	async applyChange(change: DriveChange): Promise<DownloadResult> {
+	hasPendingDownloadForPath(path: string): boolean {
+		const normalizedPath = normalizePath(path);
+		for (const pending of this.pendingDownloads.values()) {
+			if (normalizePath(pending.targetPath) === normalizedPath) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	async processPendingDownloadForPath(path: string, allowActiveWrite = false): Promise<boolean> {
+		const normalizedPath = normalizePath(path);
+		const matching = [...this.pendingDownloads.entries()]
+			.filter(([, pending]) => normalizePath(pending.targetPath) === normalizedPath);
+		if (matching.length === 0) {
+			return false;
+		}
+
+		let applied = false;
+		for (const [fileId, pending] of matching) {
+			this.pendingDownloads.delete(fileId);
+			try {
+				const result = await this.applyChange(pending.change, { allowActiveWrite });
+				if (result === 'pulled' || result === 'renamed' || result === 'deleted') {
+					applied = true;
+				}
+			} catch (err) {
+				new Notice(`Failed to refresh opened file: ${err instanceof Error ? err.message : String(err)}`);
+			}
+		}
+
+		return applied;
+	}
+
+	async applyChange(change: DriveChange, options?: ApplyChangeOptions): Promise<DownloadResult> {
 		if (change.removed) {
-			return this.handleRemoteDeletion(change.fileId);
+			return this.handleRemoteDeletion(change.fileId, options);
 		}
 
 		const remoteFile = change.file;
@@ -67,7 +105,7 @@ export class DownloadManager {
 			localPath = renamedPath;
 		}
 
-		if (this.isActiveFile(localPath)) {
+		if (this.isActiveFile(localPath) && !options?.allowActiveWrite) {
 			this.pendingDownloads.set(change.fileId, { change, targetPath: localPath });
 			return 'deferred';
 		}
@@ -112,7 +150,7 @@ export class DownloadManager {
 		}
 	}
 
-	private async handleRemoteDeletion(fileId: string): Promise<DownloadResult> {
+	private async handleRemoteDeletion(fileId: string, options?: ApplyChangeOptions): Promise<DownloadResult> {
 		const record = this.syncDb.getByGDriveId(fileId);
 		if (!record) return 'skipped';
 		if (this.isPathExcluded(record.localPath)) {
@@ -120,7 +158,7 @@ export class DownloadManager {
 			return 'skipped';
 		}
 
-		if (this.isActiveFile(record.localPath)) {
+		if (this.isActiveFile(record.localPath) && !options?.allowActiveWrite) {
 			this.pendingDownloads.set(fileId, {
 				change: { fileId, removed: true },
 				targetPath: record.localPath,
