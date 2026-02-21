@@ -214,6 +214,20 @@ export class SnapshotManager {
 		return removed;
 	}
 
+	async clearSnapshots(): Promise<number> {
+		if (!await this.plugin.app.vault.adapter.exists(this.snapshotsDir)) {
+			return 0;
+		}
+
+		const listed = await this.plugin.app.vault.adapter.list(this.snapshotsDir);
+		let removed = 0;
+		for (const snapshotPath of listed.files) {
+			await this.plugin.app.vault.adapter.remove(snapshotPath);
+			removed += 1;
+		}
+		return removed;
+	}
+
 	private snapshotPathFor(path: string): string {
 		return normalizePath(`${this.snapshotsDir}/${encodeURIComponent(normalizePath(path))}.json`);
 	}

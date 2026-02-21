@@ -81,6 +81,7 @@ export default class GDriveSyncPlugin extends Plugin {
 	}
 
 	onunload() {
+		void this.syncManager?.shutdown();
 		this.authManager?.destroy();
 	}
 
@@ -161,6 +162,17 @@ export default class GDriveSyncPlugin extends Plugin {
 		});
 
 		this.addCommand({
+			id: 'acknowledge-storage-full',
+			name: 'Resume uploads after storage warning',
+			callback: () => {
+				void (async () => {
+					const resumed = await this.syncManager.acknowledgeStorageQuotaPause();
+					new Notice(resumed ? 'Storage warning acknowledged. Uploads can resume.' : 'Uploads are already active.');
+				})();
+			},
+		});
+
+		this.addCommand({
 			id: 'open-settings',
 			name: 'Open settings',
 			callback: () => {
@@ -202,6 +214,10 @@ export default class GDriveSyncPlugin extends Plugin {
 	}
 
 	handleStatusBarClick(status: SyncStatusSnapshot): void {
+		if (status.status === 'storage-full') {
+			this.openPluginSettings();
+			return;
+		}
 		if (Platform.isMobile) {
 			new SyncStatusModal(this.app, this, status).open();
 			return;
@@ -321,21 +337,36 @@ export default class GDriveSyncPlugin extends Plugin {
 
 	forceFullResync(): void {
 		void (async () => {
-			const confirmed = await ConfirmModal.ask(this.app, {
+			const firstConfirm = await ConfirmModal.ask(this.app, {
 				title: 'Force full re-sync',
-				message: 'This will run a full re-sync. Continue?',
+				message: 'This will compare all local and remote files. Continue?',
+				confirmText: 'Continue',
+				cancelText: 'Cancel',
+				warning: true,
+			});
+			if (!firstConfirm) {
+				return;
+			}
+
+			const preview = await this.syncManager.previewFullResync();
+			const secondConfirm = await ConfirmModal.ask(this.app, {
+				title: 'Confirm full re-sync',
+				message:
+					`${preview.uploads} files will be uploaded, ` +
+					`${preview.downloads} files will be downloaded, ` +
+					`${preview.conflicts} conflicts may require resolution. Continue?`,
 				confirmText: 'Run full re-sync',
 				cancelText: 'Cancel',
 				warning: true,
 			});
-			if (!confirmed) {
+			if (!secondConfirm) {
 				return;
 			}
 
 			let cancelled = false;
 			const progress = new ProgressModal(this.app, {
 				title: 'Full re-sync in progress',
-				total: 7,
+				total: 8,
 				onCancel: () => {
 					cancelled = true;
 				},
@@ -346,12 +377,12 @@ export default class GDriveSyncPlugin extends Plugin {
 			try {
 				const result = await this.syncManager.forceFullResync(
 					(message) => {
-						currentStep = Math.min(currentStep + 1, 7);
+						currentStep = Math.min(currentStep + 1, 8);
 						progress.updateProgress(currentStep, message);
 					},
 					() => cancelled
 				);
-				progress.updateProgress(7, 'Finalizing');
+				progress.updateProgress(8, 'Finalizing');
 				progress.finish();
 				if (!result) {
 					if (cancelled) {
@@ -376,7 +407,7 @@ export default class GDriveSyncPlugin extends Plugin {
 		void (async () => {
 			const confirmed = await ConfirmModal.ask(this.app, {
 				title: 'Reset sync state',
-				message: 'This will clear local sync state. All files will be re-compared on the next sync. Continue?',
+				message: 'This will clear the sync database. All files will be re-compared on next sync. Continue?',
 				confirmText: 'Reset sync state',
 				cancelText: 'Cancel',
 				warning: true,
@@ -385,11 +416,9 @@ export default class GDriveSyncPlugin extends Plugin {
 				return;
 			}
 
-			this.syncManager.syncDb.reset();
-			await this.syncManager.syncDb.save();
-			this.settings.lastSyncPageToken = '';
-			await this.saveSettings();
-			new Notice('Sync state was reset. The next sync will rebuild state from Google Drive and local files.');
+			await this.syncManager.resetSyncStateArtifacts();
+			new Notice('Sync state was reset. Running a fresh sync comparison.');
+			void this.syncNow();
 		})();
 	}
 }

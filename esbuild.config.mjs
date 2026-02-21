@@ -62,7 +62,6 @@ const context = await esbuild.context({
 	bundle: true,
 	define: {
 		'globalThis.__GDRIVE_CLIENT_ID__': JSON.stringify(process.env.GDRIVE_CLIENT_ID ?? ''),
-		'globalThis.__GDRIVE_CLIENT_SECRET__': JSON.stringify(process.env.GDRIVE_CLIENT_SECRET ?? ''),
 	},
 	external: [
 		"obsidian",

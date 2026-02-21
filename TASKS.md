@@ -312,43 +312,43 @@
 ## Phase 6 — Hardening + Release
 
 ### 6.1 Rate Limiter
-- [ ] Create `src/gdrive/RateLimiter.ts`
-- [ ] Implement token bucket algorithm for request throttling
-- [ ] Track daily quota usage (reset at midnight UTC)
-- [ ] Implement exponential backoff on 429/403 (minimum 60s retry)
-- [ ] Surface quota usage estimate in settings UI
-- [ ] Warn user when projected to exceed daily quota
+- [x] Create `src/gdrive/RateLimiter.ts`
+- [x] Implement token bucket algorithm for request throttling
+- [x] Track daily quota usage (reset at midnight UTC)
+- [x] Implement exponential backoff on 429/403 (minimum 60s retry)
+- [x] Surface quota usage estimate in settings UI
+- [x] Warn user when projected to exceed daily quota
 
 ### 6.2 Storage Full Handling
-- [ ] Catch `storageQuotaExceeded` in DriveClient
-- [ ] Pause all uploads on storage full
-- [ ] Show persistent status bar notification
-- [ ] Resume only after user explicitly acknowledges (not automatic)
+- [x] Catch `storageQuotaExceeded` in DriveClient
+- [x] Pause all uploads on storage full
+- [x] Show persistent status bar notification
+- [x] Resume only after user explicitly acknowledges (not automatic)
 
 ### 6.3 Token Refresh Resilience
 - [ ] Test: token expires during sync → verify automatic refresh + retry
 - [ ] Test: refresh token revoked → verify persistent re-auth prompt
 - [ ] Test: network timeout during refresh → verify graceful retry
-- [ ] Ensure no infinite retry loops
+- [x] Ensure no infinite retry loops
 
 ### 6.4 Large Vault Optimization
-- [ ] Implement batched file listing (`pageSize=1000`) for initial remote index
-- [ ] Implement concurrent upload/download with limit of 3 simultaneous transfers
+- [x] Implement batched file listing (`pageSize=1000`) for initial remote index
+- [x] Implement concurrent upload/download with limit of 3 simultaneous transfers
 - [ ] Profile and optimize SyncDatabase operations for 10K+ records
-- [ ] Lazy-load sync-db.json (don't block plugin startup)
+- [x] Lazy-load sync-db.json (don't block plugin startup)
 
 ### 6.5 Force Full Re-Sync
-- [ ] Implement two-step confirmation dialog
-- [ ] Step 1: "This will compare all local and remote files. Continue?"
-- [ ] Step 2: Show diff summary — "X files will be uploaded, Y downloaded, Z conflicts" + final confirm
-- [ ] Execute with ProgressModal
-- [ ] Never silently overwrite — always show what will change
+- [x] Implement two-step confirmation dialog
+- [x] Step 1: "This will compare all local and remote files. Continue?"
+- [x] Step 2: Show diff summary — "X files will be uploaded, Y downloaded, Z conflicts" + final confirm
+- [x] Execute with ProgressModal
+- [x] Never silently overwrite — always show what will change
 
 ### 6.6 Reset Sync State
-- [ ] Implement warning dialog: "This will clear the sync database. All files will be re-compared on next sync."
-- [ ] Delete `sync-db.json` + `offline-queue.json` + `snapshots/`
-- [ ] Clear `lastSyncPageToken`
-- [ ] Trigger fresh initial sync flow
+- [x] Implement warning dialog: "This will clear the sync database. All files will be re-compared on next sync."
+- [x] Delete `sync-db.json` + `offline-queue.json` + `snapshots/`
+- [x] Clear `lastSyncPageToken`
+- [x] Trigger fresh initial sync flow
 
 ### 6.7 Edge Case Testing
 - [ ] Test: rapid file edits (10 saves in 5 seconds) → verify single upload after quiescence
@@ -369,9 +369,9 @@
 - [ ] Verify no orphaned intervals after plugin disable/re-enable
 
 ### 6.9 Build & Lint
-- [ ] Run `npm run lint` — fix all ESLint errors
-- [ ] Run `npm run build` — verify clean production build
-- [ ] Verify `main.js` bundle size is reasonable (target: < 200 KB)
+- [x] Run `npm run lint` — fix all ESLint errors
+- [x] Run `npm run build` — verify clean production build
+- [x] Verify `main.js` bundle size is reasonable (target: < 200 KB)
 - [ ] Verify no Obsidian API deprecation warnings
 - [ ] Test manual install: copy `main.js` + `manifest.json` + `styles.css` to test vault
 

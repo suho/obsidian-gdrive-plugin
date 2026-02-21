@@ -1,9 +1,11 @@
 import { Notice, TFile, normalizePath } from 'obsidian';
-import type { DriveChange, DriveClient } from '../gdrive/DriveClient';
+import { StorageQuotaError } from '../gdrive/DriveClient';
+import type { DriveChange, DriveClient, DriveFileWithPath } from '../gdrive/DriveClient';
 import { ChangeTracker } from '../gdrive/ChangeTracker';
 import type GDriveSyncPlugin from '../main';
 import type { ActivityAction, ActivityLogEntry, SyncQueueEntry } from '../types';
 import { computeContentHash } from '../utils/checksums';
+import { runWithConcurrencyLimit } from '../utils/concurrency';
 import { debounceTrailing, type DebouncedFn } from '../utils/debounce';
 import { isOnline } from '../utils/network';
 import { SyncStatusBar } from '../ui/SyncStatusBar';
@@ -31,6 +33,14 @@ interface SyncSummary {
 	updated: number;
 	renamed: number;
 	deleted: number;
+}
+
+export interface FullResyncPreview {
+	uploads: number;
+	downloads: number;
+	conflicts: number;
+	localFiles: number;
+	remoteFiles: number;
 }
 
 interface OfflineQueuePayload {
@@ -186,6 +196,8 @@ class SyncCancelledError extends Error {
 	}
 }
 
+const TRANSFER_CONCURRENCY = 3;
+
 export class SyncManager {
 	private static readonly FILE_OPEN_REFRESH_COOLDOWN_MS = 1500;
 
@@ -210,6 +222,9 @@ export class SyncManager {
 	private persistActivityLogChain: Promise<void> = Promise.resolve();
 	private conflictAlertCount = 0;
 	private errorAlertMessage = '';
+	private uploadsBlockedByStorageQuota = false;
+	private shuttingDown = false;
+	private readonly storageQuotaStatusMessage = 'Google Drive storage is full. Uploads are paused.';
 
 	readonly syncDb: SyncDatabase;
 	readonly snapshotManager: SnapshotManager;
@@ -246,11 +261,14 @@ export class SyncManager {
 	}
 
 	async initialize(): Promise<void> {
-		await this.syncDb.load();
+		this.syncDb.startLazyLoad();
 		await this.loadOfflineQueue();
 		await this.loadActivityLog();
 		this.rebuildConflictAlertsFromActivityLog();
-		await this.snapshotManager.pruneSnapshots(this.collectPendingSnapshotPaths());
+		void (async () => {
+			await this.ensureSyncDbReady();
+			await this.snapshotManager.pruneSnapshots(this.collectPendingSnapshotPaths());
+		})();
 		this.downloadManager.registerHandlers();
 		this.registerFileWatchers();
 		this.registerPeriodicPull();
@@ -258,6 +276,20 @@ export class SyncManager {
 		this.registerVisibilityHandlers();
 		await this.refreshConnectivityState(false);
 		this.updateStatusFromCurrentState();
+	}
+
+	async shutdown(): Promise<void> {
+		this.shuttingDown = true;
+		this.cancelAllModifyDebouncers();
+		if (this.pendingPushQueue.length > 0) {
+			this.offlineQueue.push(...this.pendingPushQueue);
+			this.pendingPushQueue = [];
+		}
+		await this.persistOfflineQueue();
+		this.pushFlushInFlight = false;
+		this.pullInFlight = false;
+		this.replayInFlight = false;
+		this.syncLock = false;
 	}
 
 	async pauseSync(): Promise<void> {
@@ -283,6 +315,44 @@ export class SyncManager {
 		this.updateStatusFromCurrentState();
 	}
 
+	isUploadBlockedByStorageQuota(): boolean {
+		return this.uploadsBlockedByStorageQuota;
+	}
+
+	async acknowledgeStorageQuotaPause(): Promise<boolean> {
+		if (!this.uploadsBlockedByStorageQuota) {
+			return false;
+		}
+
+		this.uploadsBlockedByStorageQuota = false;
+		this.errorAlertMessage = '';
+		this.plugin.refreshSettingTab();
+		await this.refreshConnectivityState(false);
+		this.updateStatusFromCurrentState();
+		return true;
+	}
+
+	private async ensureSyncDbReady(): Promise<void> {
+		await this.syncDb.ensureLoaded();
+	}
+
+	private handleStorageQuotaExceeded(): void {
+		if (this.uploadsBlockedByStorageQuota) {
+			this.statusBar.setStorageFull();
+			return;
+		}
+
+		this.uploadsBlockedByStorageQuota = true;
+		this.errorAlertMessage = this.storageQuotaStatusMessage;
+		this.logError('/', this.storageQuotaStatusMessage);
+		this.statusBar.setStorageFull();
+		this.plugin.refreshSettingTab();
+		new Notice(
+			'Google Drive storage is full. Uploads are paused until you acknowledge in settings after freeing space.',
+			12000
+		);
+	}
+
 	async runSync(options?: RunSyncOptions): Promise<SyncSummary | null> {
 		const checkCancelled = () => {
 			if (options?.shouldCancel?.()) {
@@ -291,6 +361,9 @@ export class SyncManager {
 		};
 
 		if (this.syncLock) {
+			return null;
+		}
+		if (this.shuttingDown) {
 			return null;
 		}
 
@@ -304,6 +377,7 @@ export class SyncManager {
 			new Notice('Complete Google Drive setup first.');
 			return null;
 		}
+		await this.ensureSyncDbReady();
 
 		const canSync = await this.refreshConnectivityState(true);
 		if (!canSync) {
@@ -316,17 +390,36 @@ export class SyncManager {
 
 		try {
 			checkCancelled();
-			options?.progress?.('Replaying offline queue');
-			const replaySummary = await this.replayOfflineQueue();
+			let replaySummary = emptyPushSummary();
+			if (!this.uploadsBlockedByStorageQuota) {
+				options?.progress?.('Replaying offline queue');
+				replaySummary = await this.replayOfflineQueue();
+			}
 			checkCancelled();
 			options?.progress?.('Pulling remote changes');
 			const pullSummary = await this.pullChanges();
+			if (pullSummary.processed > 0) {
+				options?.progress?.('Saving pulled changes');
+				await this.syncDb.save();
+			}
 			checkCancelled();
-			options?.progress?.('Pushing queued local changes');
-			const queuedPushSummary = await this.flushPendingPushQueue();
-			checkCancelled();
-			options?.progress?.('Scanning local vault for upload');
-			const fullPushResult = await this.uploadManager.syncLocalVault();
+			let queuedPushSummary = emptyPushSummary();
+			let fullPushResult: Awaited<ReturnType<UploadManager['syncLocalVault']>> = {
+				summary: {
+					...emptyPushSummary(),
+					skipped: 0,
+				},
+				changedDb: false,
+			};
+			if (!this.uploadsBlockedByStorageQuota) {
+				options?.progress?.('Pushing queued local changes');
+				queuedPushSummary = await this.flushPendingPushQueue();
+				checkCancelled();
+				options?.progress?.('Scanning local vault for upload');
+				fullPushResult = await this.uploadManager.syncLocalVault();
+			} else {
+				options?.progress?.('Uploads paused due to storage limit');
+			}
 			checkCancelled();
 
 			const totalQueuedChanges =
@@ -339,7 +432,7 @@ export class SyncManager {
 				queuedPushSummary.renamed +
 				queuedPushSummary.deleted;
 
-			if (pullSummary.processed > 0 || totalQueuedChanges > 0 || fullPushResult.changedDb) {
+			if (totalQueuedChanges > 0 || fullPushResult.changedDb) {
 				options?.progress?.('Saving sync database');
 				await this.syncDb.save();
 			}
@@ -347,7 +440,12 @@ export class SyncManager {
 			await this.snapshotManager.pruneSnapshots(this.collectPendingSnapshotPaths());
 
 			this.errorAlertMessage = '';
-			this.statusBar.setSynced();
+			if (this.uploadsBlockedByStorageQuota) {
+				this.statusBar.setStorageFull();
+			} else {
+				this.statusBar.setSynced();
+			}
+			this.maybeWarnProjectedQuotaUsage();
 			return {
 				pulled: pullSummary.processed,
 				created: fullPushResult.summary.created + replaySummary.created + queuedPushSummary.created,
@@ -358,6 +456,10 @@ export class SyncManager {
 		} catch (err) {
 			if (err instanceof SyncCancelledError) {
 				this.logActivity('skipped', '/', 'Sync cancelled by user.');
+				return null;
+			}
+			if (err instanceof StorageQuotaError) {
+				this.handleStorageQuotaExceeded();
 				return null;
 			}
 			const message = err instanceof Error ? err.message : String(err);
@@ -376,6 +478,9 @@ export class SyncManager {
 		if (this.syncLock || this.pushFlushInFlight) {
 			return null;
 		}
+		if (this.shuttingDown) {
+			return null;
+		}
 
 		if (this.plugin.settings.syncPaused) {
 			this.statusBar.setPaused();
@@ -385,6 +490,12 @@ export class SyncManager {
 
 		if (!this.plugin.settings.setupComplete || !this.plugin.settings.gDriveFolderId) {
 			new Notice('Complete Google Drive setup first.');
+			return null;
+		}
+		await this.ensureSyncDbReady();
+		if (this.uploadsBlockedByStorageQuota) {
+			this.statusBar.setStorageFull();
+			new Notice('Uploads are paused because Google Drive storage is full. Acknowledge in settings to resume.');
 			return null;
 		}
 
@@ -410,6 +521,7 @@ export class SyncManager {
 			}
 
 			this.errorAlertMessage = '';
+			this.maybeWarnProjectedQuotaUsage();
 			return {
 				created: replaySummary.created + queuedSummary.created + fullPushResult.summary.created,
 				updated: replaySummary.updated + queuedSummary.updated + fullPushResult.summary.updated,
@@ -417,6 +529,10 @@ export class SyncManager {
 				deleted: replaySummary.deleted + queuedSummary.deleted + fullPushResult.summary.deleted,
 			};
 		} catch (err) {
+			if (err instanceof StorageQuotaError) {
+				this.handleStorageQuotaExceeded();
+				return null;
+			}
 			const message = err instanceof Error ? err.message : String(err);
 			console.error('Google Drive push failed', err);
 			this.statusBar.setError(message);
@@ -433,6 +549,9 @@ export class SyncManager {
 		if (this.syncLock || this.pullInFlight) {
 			return null;
 		}
+		if (this.shuttingDown) {
+			return null;
+		}
 
 		if (this.plugin.settings.syncPaused) {
 			this.statusBar.setPaused();
@@ -444,6 +563,7 @@ export class SyncManager {
 			new Notice('Complete Google Drive setup first.');
 			return null;
 		}
+		await this.ensureSyncDbReady();
 
 		const canSync = await this.refreshConnectivityState(true);
 		if (!canSync) {
@@ -459,6 +579,7 @@ export class SyncManager {
 				await this.syncDb.save();
 			}
 			this.errorAlertMessage = '';
+			this.maybeWarnProjectedQuotaUsage();
 			return summary;
 		} catch (err) {
 			const message = err instanceof Error ? err.message : String(err);
@@ -480,6 +601,7 @@ export class SyncManager {
 		if (shouldCancel?.()) {
 			return null;
 		}
+		await this.ensureSyncDbReady();
 
 		const previousPageToken = this.plugin.settings.lastSyncPageToken;
 		const previousSetupState = this.plugin.settings.setupComplete;
@@ -497,6 +619,93 @@ export class SyncManager {
 			}
 			await this.plugin.saveSettings();
 		}
+	}
+
+	async previewFullResync(): Promise<FullResyncPreview> {
+		await this.ensureSyncDbReady();
+		if (!this.plugin.settings.gDriveFolderId) {
+			return {
+				uploads: 0,
+				downloads: 0,
+				conflicts: 0,
+				localFiles: 0,
+				remoteFiles: 0,
+			};
+		}
+
+		const [localByPath, remoteByPath] = await Promise.all([
+			this.collectLocalHashesForPreview(),
+			this.collectRemoteHashesForPreview(),
+		]);
+
+		let uploads = 0;
+		let downloads = 0;
+		let conflicts = 0;
+		const allPaths = new Set<string>([
+			...localByPath.keys(),
+			...remoteByPath.keys(),
+		]);
+
+		for (const path of allPaths) {
+			const localHash = localByPath.get(path);
+			const remoteHash = remoteByPath.get(path);
+
+			if (localHash && !remoteHash) {
+				uploads += 1;
+				continue;
+			}
+			if (!localHash && remoteHash) {
+				downloads += 1;
+				continue;
+			}
+			if (!localHash || !remoteHash || localHash === remoteHash) {
+				continue;
+			}
+
+			const record = this.syncDb.getRecord(path);
+			if (!record) {
+				conflicts += 1;
+				continue;
+			}
+
+			const localChanged = record.localHash !== localHash;
+			const remoteChanged = record.remoteHash !== remoteHash;
+			if (localChanged && remoteChanged) {
+				conflicts += 1;
+			} else if (localChanged) {
+				uploads += 1;
+			} else if (remoteChanged) {
+				downloads += 1;
+			} else {
+				conflicts += 1;
+			}
+		}
+
+		return {
+			uploads,
+			downloads,
+			conflicts,
+			localFiles: localByPath.size,
+			remoteFiles: remoteByPath.size,
+		};
+	}
+
+	async resetSyncStateArtifacts(): Promise<void> {
+		await this.ensureDataDir();
+		await this.ensureSyncDbReady();
+
+		this.cancelAllModifyDebouncers();
+		this.pendingPushQueue = [];
+		this.offlineQueue = [];
+		await this.syncDb.deletePersistedFiles();
+		await this.removeIfExists(this.offlineQueuePath);
+		await this.snapshotManager.clearSnapshots();
+		this.plugin.settings.lastSyncPageToken = '';
+		this.plugin.settings.setupComplete = true;
+		this.uploadsBlockedByStorageQuota = false;
+		this.errorAlertMessage = '';
+		await this.plugin.saveSettings();
+		this.updateStatusFromCurrentState();
 	}
 
 	getPendingChangeCount(): number {
@@ -524,6 +733,7 @@ export class SyncManager {
 	}
 
 	async handleSelectiveSyncSettingsChange(previous: SelectiveSyncSnapshot): Promise<number> {
+		await this.ensureSyncDbReady();
 		const current = this.captureSelectiveSyncSnapshot();
 		const allPaths = await this.collectAllLocalPaths();
 		let queued = 0;
@@ -733,15 +943,23 @@ export class SyncManager {
 		if (this.pushFlushInFlight) {
 			return emptyPushSummary();
 		}
+		if (this.shuttingDown) {
+			return emptyPushSummary();
+		}
 
 		if (this.plugin.settings.syncPaused) {
 			this.statusBar.setPaused();
+			return emptyPushSummary();
+		}
+		if (this.uploadsBlockedByStorageQuota) {
+			this.statusBar.setStorageFull();
 			return emptyPushSummary();
 		}
 
 		if (!this.plugin.settings.autoSync) {
 			return emptyPushSummary();
 		}
+		await this.ensureSyncDbReady();
 
 		if (this.pendingPushQueue.length === 0) {
 			return emptyPushSummary();
@@ -765,14 +983,23 @@ export class SyncManager {
 				}
 				this.statusBar.setSyncing(this.pendingPushQueue.length + 1);
 
-				const changed = await this.pushSingleQueueEntry(entry, summary);
-				changedDb = changedDb || changed;
+				try {
+					const changed = await this.pushSingleQueueEntry(entry, summary);
+					changedDb = changedDb || changed;
+				} catch (err) {
+					this.pendingPushQueue.unshift(entry);
+					throw err;
+				}
 			}
 
 			if (changedDb) {
 				await this.syncDb.save();
 			}
 		} catch (err) {
+			if (err instanceof StorageQuotaError) {
+				this.handleStorageQuotaExceeded();
+				return summary;
+			}
 			const message = err instanceof Error ? err.message : String(err);
 			console.error('Failed to flush push queue', err);
 			this.statusBar.setError(message);
@@ -827,10 +1054,14 @@ export class SyncManager {
 		if (this.pullInFlight || this.syncLock) {
 			return;
 		}
+		if (this.shuttingDown) {
+			return;
+		}
 
 		if (!this.plugin.settings.autoSync || this.plugin.settings.syncPaused) {
 			return;
 		}
+		await this.ensureSyncDbReady();
 
 		const canSync = await this.refreshConnectivityState(false);
 		if (!canSync) {
@@ -847,7 +1078,12 @@ export class SyncManager {
 			await this.replayOfflineQueue();
 			await this.flushPendingPushQueue();
 			this.errorAlertMessage = '';
+			this.maybeWarnProjectedQuotaUsage();
 		} catch (err) {
+			if (err instanceof StorageQuotaError) {
+				this.handleStorageQuotaExceeded();
+				return;
+			}
 			const message = err instanceof Error ? err.message : String(err);
 			console.error('Auto-pull failed', err);
 			this.statusBar.setError(message);
@@ -859,15 +1095,20 @@ export class SyncManager {
 	}
 
 	private async pullChanges(): Promise<PullSummary> {
+		await this.ensureSyncDbReady();
 		const changes = await this.changeTracker.listChangesSinceLastSync();
-		let processed = 0;
-
+		const deduped = new Map<string, DriveChange>();
 		for (const change of changes) {
+			deduped.set(change.fileId, change);
+		}
+
+		let processed = 0;
+		await runWithConcurrencyLimit([...deduped.values()], TRANSFER_CONCURRENCY, async change => {
 			const result = await this.applyRemoteChange(change);
 			if (result) {
 				processed += 1;
 			}
-		}
+		});
 
 		return { processed };
 	}
@@ -927,6 +1168,7 @@ export class SyncManager {
 		if (!file || !this.plugin.settings.autoSync || this.plugin.settings.syncPaused) {
 			return;
 		}
+		await this.ensureSyncDbReady();
 
 		const path = normalizePath(file.path);
 		if (this.isExcludedPath(path) || this.hasQueuedLocalChange(path)) {
@@ -967,8 +1209,15 @@ export class SyncManager {
 		if (this.replayInFlight || this.offlineQueue.length === 0) {
 			return emptyPushSummary();
 		}
+		if (this.shuttingDown) {
+			return emptyPushSummary();
+		}
 
 		if (this.plugin.settings.syncPaused) {
+			return emptyPushSummary();
+		}
+		if (this.uploadsBlockedByStorageQuota) {
+			this.statusBar.setStorageFull();
 			return emptyPushSummary();
 		}
 
@@ -1019,6 +1268,10 @@ export class SyncManager {
 
 		if (this.plugin.settings.syncPaused) {
 			this.statusBar.setPaused();
+			return;
+		}
+		if (this.uploadsBlockedByStorageQuota) {
+			this.statusBar.setStorageFull();
 			return;
 		}
 
@@ -1258,6 +1511,7 @@ export class SyncManager {
 	}
 
 	async restoreFileFromRemoteTrash(fileId: string, preferredPath: string): Promise<string> {
+		await this.ensureSyncDbReady();
 		await this.driveClient.restoreFileFromTrash(fileId);
 		const metadata = await this.driveClient.getFileMetadata(fileId);
 		const remoteContent = await this.driveClient.downloadFile(fileId);
@@ -1285,6 +1539,7 @@ export class SyncManager {
 	}
 
 	async restoreLocalTrashFile(trashPath: string, destinationPath: string): Promise<string> {
+		await this.ensureSyncDbReady();
 		const normalizedTrashPath = normalizePath(trashPath);
 		const targetPath = await this.resolveRestoredPath(destinationPath);
 		await this.ensureParentDirectories(targetPath);
@@ -1313,6 +1568,7 @@ export class SyncManager {
 	}
 
 	async restoreFileRevision(path: string, fileId: string, revisionId: string): Promise<void> {
+		await this.ensureSyncDbReady();
 		const normalizedPath = normalizePath(path);
 		const content = await this.driveClient.downloadRevision(fileId, revisionId);
 		await this.ensureParentDirectories(normalizedPath);
@@ -1391,6 +1647,76 @@ export class SyncManager {
 		}
 
 		return [...discoveredFiles].sort((a, b) => a.localeCompare(b));
+	}
+
+	private async collectLocalHashesForPreview(): Promise<Map<string, string>> {
+		const localByPath = new Map<string, string>();
+		const localPaths = await this.collectAllLocalPaths();
+
+		await runWithConcurrencyLimit(localPaths, TRANSFER_CONCURRENCY, async path => {
+			const stat = await this.plugin.app.vault.adapter.stat(path);
+			if (isExcluded(
+				path,
+				this.plugin.settings.excludedPaths,
+				this.plugin.settings,
+				this.plugin.app.vault.configDir,
+				stat?.size
+			)) {
+				return;
+			}
+			const content = await this.plugin.app.vault.adapter.readBinary(path);
+			const hash = await computeContentHash(content);
+			localByPath.set(path, hash);
+		});
+
+		return localByPath;
+	}
+
+	private async collectRemoteHashesForPreview(): Promise<Map<string, string>> {
+		const remoteByPath = new Map<string, string>();
+		const remoteFiles: DriveFileWithPath[] = await this.driveClient.listAllFilesRecursiveWithPaths(this.plugin.settings.gDriveFolderId);
+
+		for (const remote of remoteFiles) {
+			const normalizedPath = normalizePath(remote.path);
+			const remoteSize = remote.file.size ? Number(remote.file.size) : undefined;
+			if (isExcluded(
+				normalizedPath,
+				this.plugin.settings.excludedPaths,
+				this.plugin.settings,
+				this.plugin.app.vault.configDir,
+				Number.isFinite(remoteSize) ? remoteSize : undefined
+			)) {
+				continue;
+			}
+			if (remote.file.md5Checksum) {
+				remoteByPath.set(normalizedPath, remote.file.md5Checksum);
+				continue;
+			}
+
+			// Fallback for file types without md5Checksum from metadata.
+			const content = await this.driveClient.downloadFile(remote.file.id);
+			remoteByPath.set(normalizedPath, await computeContentHash(content));
+		}
+
+		return remoteByPath;
+	}
+
+	private maybeWarnProjectedQuotaUsage(): void {
+		if (!this.driveClient.consumeQuotaWarning()) {
+			return;
+		}
+
+		const snapshot = this.driveClient.getRateLimitSnapshot();
+		new Notice(
+			`Google Drive API usage is projected at about ${snapshot.projectedRequestsToday} requests today (estimate: ${snapshot.estimatedDailyQuota}).`,
+			10000
+		);
+	}
+
+	private async removeIfExists(path: string): Promise<void> {
+		if (await this.plugin.app.vault.adapter.exists(path)) {
+			await this.plugin.app.vault.adapter.remove(path);
+		}
 	}
 
 	private async resolveRestoredPath(requestedPath: string): Promise<string> {

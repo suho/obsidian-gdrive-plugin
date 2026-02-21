@@ -63,6 +63,8 @@ export class SyncDatabase {
 	private readonly backupPath: string;
 	private readonly tmpPath: string;
 	private records = new Map<string, SyncRecord>();
+	private loadPromise: Promise<void> | null = null;
+	private loaded = false;
 
 	constructor(private readonly plugin: GDriveSyncPlugin) {
 		this.baseDir = normalizePath(`${this.plugin.app.vault.configDir}/plugins/${this.plugin.manifest.id}`);
@@ -75,17 +77,41 @@ export class SyncDatabase {
 		return this.dbPath;
 	}
 
+	startLazyLoad(): void {
+		if (!this.loadPromise) {
+			this.loadPromise = this.loadInternal();
+		}
+	}
+
 	async load(): Promise<void> {
+		await this.ensureLoaded();
+	}
+
+	async ensureLoaded(): Promise<void> {
+		if (this.loaded) {
+			return;
+		}
+
+		if (!this.loadPromise) {
+			this.loadPromise = this.loadInternal();
+		}
+
+		await this.loadPromise;
+	}
+
+	private async loadInternal(): Promise<void> {
 		await this.ensureBaseDir();
 
 		if (!await this.plugin.app.vault.adapter.exists(this.dbPath)) {
 			this.records.clear();
+			this.loaded = true;
 			return;
 		}
 
 		try {
 			const payload = parsePayload(await this.plugin.app.vault.adapter.read(this.dbPath));
 			this.records = new Map<string, SyncRecord>(Object.entries(payload.records));
+			this.loaded = true;
 			return;
 		} catch {
 			// Fall through to backup recovery.
@@ -96,6 +122,7 @@ export class SyncDatabase {
 				const payload = parsePayload(await this.plugin.app.vault.adapter.read(this.backupPath));
 				this.records = new Map<string, SyncRecord>(Object.entries(payload.records));
 				await this.save();
+				this.loaded = true;
 				return;
 			} catch {
 				// Backup is invalid as well; rebuild from scratch.
@@ -111,6 +138,7 @@ export class SyncDatabase {
 
 		this.records.clear();
 		await this.save();
+		this.loaded = true;
 	}
 
 	async save(): Promise<void> {
@@ -179,6 +207,19 @@ export class SyncDatabase {
 
 	reset(): void {
 		this.records.clear();
+	}
+
+	async deletePersistedFiles(): Promise<void> {
+		await this.ensureBaseDir();
+
+		for (const path of [this.dbPath, this.backupPath, this.tmpPath]) {
+			if (await this.plugin.app.vault.adapter.exists(path)) {
+				await this.plugin.app.vault.adapter.remove(path);
+			}
+		}
+
+		this.records.clear();
+		this.loaded = true;
 	}
 
 	private async ensureBaseDir(): Promise<void> {

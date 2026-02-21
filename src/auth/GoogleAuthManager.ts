@@ -18,6 +18,8 @@ const MOBILE_REDIRECT_URI = 'obsidian://gdrive-callback';
 // Refresh access token this many ms before expiry (5 minutes)
 const REFRESH_BUFFER_MS = 5 * 60 * 1000;
 const MOBILE_AUTH_TIMEOUT_MS = 5 * 60 * 1000;
+const REFRESH_RETRY_COUNT = 2;
+const REFRESH_RETRY_BASE_MS = 1000;
 const SESSION_CODE_VERIFIER_KEY = 'gdrive_code_verifier';
 const SESSION_OAUTH_STATE_KEY = 'gdrive_oauth_state';
 
@@ -26,7 +28,6 @@ export class GoogleAuthManager {
 	// The plugin must have a Google OAuth 2.0 client ID (registered in GCP Console)
 	// with redirect URIs: http://127.0.0.1 (any port) and obsidian://gdrive-callback
 	private readonly clientId: string;
-	private readonly clientSecret: string;
 
 	// In-memory access token (not persisted — reconstructed from refresh token on load)
 	private accessToken = '';
@@ -42,11 +43,10 @@ export class GoogleAuthManager {
 	constructor(
 		private readonly plugin: GDriveSyncPlugin
 	) {
-		// Client credentials are injected at build time via esbuild define.
-		// Set GDRIVE_CLIENT_ID and GDRIVE_CLIENT_SECRET in your build environment.
+		// Client ID is injected at build time via esbuild define.
+		// Set GDRIVE_CLIENT_ID in your build environment.
 		/* eslint-disable @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-explicit-any */
 		this.clientId = ((globalThis as any).__GDRIVE_CLIENT_ID__ as string | undefined) ?? '';
-		this.clientSecret = ((globalThis as any).__GDRIVE_CLIENT_SECRET__ as string | undefined) ?? '';
 		/* eslint-enable @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-explicit-any */
 		if (this.plugin.settings.needsReauthentication) {
 			this.showReauthenticateNotice();
@@ -73,10 +73,10 @@ export class GoogleAuthManager {
 	 * Mobile:  opens system browser → obsidian:// URI scheme
 	 */
 	async authenticate(): Promise<void> {
-		if (!this.clientId || !this.clientSecret) {
+		if (!this.clientId) {
 			throw new Error(
-				'Google OAuth client credentials are not configured. ' +
-				'Set GDRIVE_CLIENT_ID and GDRIVE_CLIENT_SECRET at build time.'
+				'Google OAuth client ID is not configured. ' +
+				'Set GDRIVE_CLIENT_ID at build time.'
 			);
 		}
 
@@ -124,10 +124,10 @@ export class GoogleAuthManager {
 
 	/** Import a refresh token from another device and initialize session state. */
 	async importRefreshToken(refreshToken: string): Promise<void> {
-		if (!this.clientId || !this.clientSecret) {
+		if (!this.clientId) {
 			throw new Error(
-				'Google OAuth client credentials are not configured. ' +
-				'Set GDRIVE_CLIENT_ID and GDRIVE_CLIENT_SECRET at build time.'
+				'Google OAuth client ID is not configured. ' +
+				'Set GDRIVE_CLIENT_ID at build time.'
 			);
 		}
 
@@ -263,7 +263,6 @@ export class GoogleAuthManager {
 			body: new URLSearchParams({
 				code,
 				client_id: this.clientId,
-				client_secret: this.clientSecret,
 				redirect_uri: redirectUri,
 				grant_type: 'authorization_code',
 				code_verifier: codeVerifier,
@@ -286,9 +285,12 @@ export class GoogleAuthManager {
 
 		let response;
 		try {
-			response = await this.requestRefreshGrant(this.plugin.settings.refreshToken);
-		} catch {
-			throw new AuthError('Network error during token refresh');
+			response = await this.requestRefreshGrantWithRetry(this.plugin.settings.refreshToken);
+		} catch (err) {
+			if (err instanceof AuthError) {
+				throw err;
+			}
+			throw new AuthError('Network error during token refresh. Please retry.');
 		}
 
 		if (response.status === 400 || response.status === 401) {
@@ -317,6 +319,38 @@ export class GoogleAuthManager {
 		await this.storeTokens(data);
 	}
 
+	private async requestRefreshGrantWithRetry(refreshToken: string): Promise<Awaited<ReturnType<typeof requestUrl>>> {
+		let lastError: unknown = null;
+
+		for (let attempt = 0; attempt <= REFRESH_RETRY_COUNT; attempt += 1) {
+			try {
+				const response = await this.requestRefreshGrant(refreshToken);
+				if (response.status >= 500 && attempt < REFRESH_RETRY_COUNT) {
+					await this.sleep(Math.pow(2, attempt) * REFRESH_RETRY_BASE_MS);
+					continue;
+				}
+				return response;
+			} catch (err) {
+				lastError = err;
+				if (attempt >= REFRESH_RETRY_COUNT) {
+					break;
+				}
+				await this.sleep(Math.pow(2, attempt) * REFRESH_RETRY_BASE_MS);
+			}
+		}
+
+		if (lastError instanceof Error) {
+			throw lastError;
+		}
+		throw new AuthError('Token refresh failed');
+	}
+
+	private async sleep(ms: number): Promise<void> {
+		await new Promise<void>(resolve => {
+			window.setTimeout(resolve, ms);
+		});
+	}
+
 	private async requestRefreshGrant(refreshToken: string): Promise<Awaited<ReturnType<typeof requestUrl>>> {
 		return requestUrl({
 			url: TOKEN_ENDPOINT,
@@ -326,7 +360,6 @@ export class GoogleAuthManager {
 				grant_type: 'refresh_token',
 				refresh_token: refreshToken,
 				client_id: this.clientId,
-				client_secret: this.clientSecret,
 			}).toString(),
 		});
 	}

@@ -50,6 +50,10 @@ If your plugin does not need CSS, delete this file.
 	color: var(--text-accent);
 }
 
+.gdrive-sync-status--storage-full {
+	color: var(--color-red);
+}
+
 .gdrive-sync-spin {
 	animation: gdrive-sync-rotate 1s linear infinite;
 }

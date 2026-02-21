@@ -505,6 +505,24 @@ export class GDriveSettingTab extends PluginSettingTab {
 		// ── Advanced ──────────────────────────────────────────────────
 		new Setting(containerEl).setName('Advanced').setHeading();
 
+		if (this.plugin.syncManager.isUploadBlockedByStorageQuota()) {
+			new Setting(containerEl)
+				.setName('Uploads paused due to storage limit')
+				.setDesc('Google Drive storage is full. Free space, then acknowledge to resume uploads.')
+				.addButton(btn =>
+					btn
+						.setButtonText('Acknowledge and resume')
+						.setWarning()
+						.onClick(() => {
+							void (async () => {
+								const resumed = await this.plugin.syncManager.acknowledgeStorageQuotaPause();
+								new Notice(resumed ? 'Uploads can resume.' : 'Uploads are already active.');
+								this.display();
+							})();
+						})
+				);
+		}
+
 		new Setting(containerEl)
 			.setName('View activity log')
 			.addButton(btn =>
@@ -620,6 +638,19 @@ export class GDriveSettingTab extends PluginSettingTab {
 	private renderStorageUsage(containerEl: HTMLElement): void {
 		const descEl = containerEl.createDiv({ text: 'Storage usage: loading...' });
 		descEl.addClass('gdrive-sync-storage-usage');
+		const rateEl = containerEl.createDiv({ text: 'API usage estimate: loading...' });
+		rateEl.addClass('gdrive-sync-storage-usage');
+		const snapshot = this.plugin.driveClient.getRateLimitSnapshot();
+		const resetAt = new Date(snapshot.resetAtUtcMs).toUTCString();
+		rateEl.setText(
+			`API usage estimate: ${snapshot.requestsToday} requests today, projected ${snapshot.projectedRequestsToday} by ${resetAt}.`
+		);
+		if (snapshot.shouldWarn) {
+			rateEl.addClass('gdrive-sync-error');
+			rateEl.setText(
+				`API usage estimate: ${snapshot.projectedRequestsToday} projected requests may exceed the daily budget of ${snapshot.estimatedDailyQuota}.`
+			);
+		}
 		void (async () => {
 			try {
 				const quota = await this.plugin.driveClient.getStorageQuota();

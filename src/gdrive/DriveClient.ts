@@ -1,6 +1,7 @@
 import { requestUrl, RequestUrlParam } from 'obsidian';
 import type { GoogleAuthManager } from '../auth/GoogleAuthManager';
 import type { DriveFileMetadata, DriveRevision } from '../types';
+import { RateLimiter, type RateLimiterSnapshot } from './RateLimiter';
 
 const API_BASE = 'https://www.googleapis.com/drive/v3';
 const UPLOAD_BASE = 'https://www.googleapis.com/upload/drive/v3';
@@ -10,7 +11,36 @@ const FILE_FIELDS = 'id,name,mimeType,modifiedTime,md5Checksum,size,parents,tras
 
 // Max bytes for simple upload — use resumable above this
 const RESUMABLE_THRESHOLD = 5 * 1024 * 1024; // 5 MB
+const MAX_RATE_LIMIT_RETRIES = 3;
 type DriveResponse = Awaited<ReturnType<typeof requestUrl>>;
+
+interface ParsedGoogleError {
+	reason?: string;
+	message: string;
+}
+
+function parseGoogleError(body: string): ParsedGoogleError {
+	let errorData: { error?: { errors?: { reason?: string; message?: string }[] } } = {};
+	try {
+		errorData = JSON.parse(body) as typeof errorData;
+	} catch {
+		// Non-JSON error response
+	}
+
+	const reason = errorData.error?.errors?.[0]?.reason;
+	const message = errorData.error?.errors?.[0]?.message ?? body;
+	return { reason, message };
+}
+
+function isRetryableRateLimitError(status: number, reason: string | undefined): boolean {
+	if (status === 429) {
+		return true;
+	}
+	if (status !== 403) {
+		return false;
+	}
+	return reason === 'rateLimitExceeded' || reason === 'userRateLimitExceeded' || reason === 'quotaExceeded';
+}
 
 export class DriveClientError extends Error {
 	constructor(
@@ -30,6 +60,8 @@ export class StorageQuotaError extends DriveClientError {
 }
 
 export class DriveClient {
+	private readonly rateLimiter = new RateLimiter();
+
 	constructor(private readonly auth: GoogleAuthManager) {}
 
 	// ── File operations ───────────────────────────────────────────────
@@ -516,6 +548,14 @@ export class DriveClient {
 		};
 	}
 
+	getRateLimitSnapshot(): RateLimiterSnapshot {
+		return this.rateLimiter.getSnapshot();
+	}
+
+	consumeQuotaWarning(): boolean {
+		return this.rateLimiter.consumeProjectedQuotaWarning();
+	}
+
 	// ── Upload helpers ────────────────────────────────────────────────
 
 	private async multipartUpload(
@@ -634,31 +674,44 @@ export class DriveClient {
 	}
 
 	private async requestWithAuth(buildRequest: (token: string) => RequestUrlParam): Promise<DriveResponse> {
-		const initialToken = await this.auth.getAccessToken();
-		let response = await requestUrl(buildRequest(initialToken));
-		if (response.status !== 401) {
+		let token = await this.auth.getAccessToken();
+		let refreshedAfterUnauthorized = false;
+		let retryAttempt = 0;
+
+		for (;;) {
+			await this.rateLimiter.waitForTurn();
+			const response = await requestUrl(buildRequest(token));
+			this.rateLimiter.recordRequest();
+			const retryReason =
+				response.status === 403 || response.status === 429
+					? parseGoogleError(response.text).reason
+					: undefined;
+
+			if (response.status === 401 && !refreshedAfterUnauthorized) {
+				token = await this.auth.refreshAfterUnauthorized();
+				refreshedAfterUnauthorized = true;
+				continue;
+			}
+
+			if (isRetryableRateLimitError(response.status, retryReason) && retryAttempt < MAX_RATE_LIMIT_RETRIES) {
+				this.rateLimiter.registerBackoff(retryAttempt);
+				retryAttempt += 1;
+				continue;
+			}
+
+			if (!isRetryableRateLimitError(response.status, retryReason)) {
+				this.rateLimiter.clearBackoff();
+			}
+
 			return response;
 		}
-
-		const refreshedToken = await this.auth.refreshAfterUnauthorized();
-		response = await requestUrl(buildRequest(refreshedToken));
-		return response;
 	}
 
 	// ── Error handling ────────────────────────────────────────────────
 
 	private assertOk(status: number, body: string): void {
 		if (status >= 200 && status < 300) return;
-
-		let errorData: { error?: { errors?: { reason?: string; message?: string }[] } } = {};
-		try {
-			errorData = JSON.parse(body) as typeof errorData;
-		} catch {
-			// Non-JSON error response
-		}
-
-		const reason = errorData.error?.errors?.[0]?.reason;
-		const message = errorData.error?.errors?.[0]?.message ?? body;
+		const { reason, message } = parseGoogleError(body);
 
 		if (reason === 'storageQuotaExceeded') {
 			throw new StorageQuotaError();

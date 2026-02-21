@@ -1,7 +1,7 @@
 import { setIcon } from 'obsidian';
 import type GDriveSyncPlugin from '../main';
 
-export type BasicSyncStatus = 'synced' | 'syncing' | 'pending' | 'offline' | 'error' | 'conflict' | 'paused';
+export type BasicSyncStatus = 'synced' | 'syncing' | 'pending' | 'offline' | 'error' | 'conflict' | 'paused' | 'storage-full';
 
 export interface SyncStatusSnapshot {
 	status: BasicSyncStatus;
@@ -96,6 +96,12 @@ export class SyncStatusBar {
 		this.render('Sync error');
 	}
 
+	setStorageFull(): void {
+		this.status = 'storage-full';
+		this.syncingCount = 0;
+		this.render('Storage full');
+	}
+
 	private render(label: string): void {
 		this.element.removeClass(
 			'gdrive-sync-status--synced',
@@ -104,7 +110,8 @@ export class SyncStatusBar {
 			'gdrive-sync-status--offline',
 			'gdrive-sync-status--paused',
 			'gdrive-sync-status--error',
-			'gdrive-sync-status--conflict'
+			'gdrive-sync-status--conflict',
+			'gdrive-sync-status--storage-full'
 		);
 		this.element.addClass(`gdrive-sync-status--${this.status}`);
 		this.iconEl.removeClass('gdrive-sync-spin');
@@ -124,6 +131,7 @@ export class SyncStatusBar {
 		if (this.status === 'pending') return 'cloud-upload';
 		if (this.status === 'offline') return 'cloud-off';
 		if (this.status === 'paused') return 'pause-circle';
+		if (this.status === 'storage-full') return 'alert-octagon';
 		if (this.status === 'conflict') return 'zap';
 		return 'alert-triangle';
 	}
@@ -144,6 +152,7 @@ export class SyncStatusBar {
 				: 'Offline. Changes will sync when online';
 		}
 		if (this.status === 'paused') return 'Sync is paused';
+		if (this.status === 'storage-full') return 'Google Drive storage is full. Acknowledge in settings after freeing space';
 		if (this.status === 'conflict') {
 			return this.conflictCount > 1
 				? `${this.conflictCount} conflicts need attention`

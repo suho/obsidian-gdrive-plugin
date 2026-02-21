@@ -12,38 +12,8 @@ Sync your Obsidian vault with Google Drive using the Google Drive API.
 - Supports manual sync, pause sync, and resume sync commands
 - Shows sync status in the status bar
 - Lets you copy a refresh token on desktop and import it on mobile
-
-## Progress snapshot
-
-Current implementation status from `TASKS.md`:
-
-- Phase 1 Foundation and auth: done
-- Phase 2 Core sync engine: done
-- Phase 3 Auto-sync and offline: in progress
-- Phase 4 Merge and conflict UX: not started
-- Phase 5 Advanced UI and tools: in progress
-- Phase 6 Hardening and release prep: in progress
-
-### Implemented now
-
-- Desktop OAuth sign-in flow (browser + localhost callback)
-- Mobile callback support and mobile refresh-token import
-- Setup wizard for account connection and folder selection
-- Incremental pull via Google Drive Changes API
-- Upload flow for create, update, rename, delete
-- Download flow with active-file protection and deferred apply
-- Sync state database with recovery fallback
-- Conflict strategy settings UI
-- Selective sync settings UI
-- Vault configuration sync settings UI
-
-### Planned or partially implemented
-
-- Event-driven auto-push and periodic auto-pull
-- Offline queue and reconnect replay
-- Full conflict resolution UI and merge workflow
-- Activity log view, deleted files UI, largest files UI
-- Hardening passes and broader edge-case testing
+- Applies API request throttling and retry backoff for quota/rate errors
+- Pauses uploads when Google Drive storage is full until you explicitly resume
 
 ## Important limitations
 
@@ -52,6 +22,7 @@ Current implementation status from `TASKS.md`:
 - Files added manually in Google Drive web/app are not guaranteed to be visible to this plugin.
 - Selective sync settings are device-local and do not sync across devices.
 - The plugin does not sync all files in `.obsidian`; it syncs only enabled vault config files.
+- Version history behavior is different from Obsidian Sync because this plugin relies on Google Drive revisions.
 
 ## Install on desktop app
 
@@ -117,6 +88,7 @@ Use this when mobile sign-in is inconvenient or when you want to quickly connect
 - `Resume sync`
 - `Open settings`
 - `Connect to Google Drive` (desktop)
+- `Resume uploads after storage warning`
 
 ## Development
 
@@ -131,10 +103,9 @@ Create `.env` in the project root:
 
 ```bash
 GDRIVE_CLIENT_ID=your_google_oauth_client_id
-GDRIVE_CLIENT_SECRET=your_google_oauth_client_secret
 ```
 
-The build injects these values into `main.js`.
+The build injects this value into `main.js`.
 
 ### Run
 

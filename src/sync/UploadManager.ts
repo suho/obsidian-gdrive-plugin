@@ -3,6 +3,7 @@ import type GDriveSyncPlugin from '../main';
 import type { DriveClient } from '../gdrive/DriveClient';
 import type { SyncRecord } from '../types';
 import { computeContentHash } from '../utils/checksums';
+import { runWithConcurrencyLimit } from '../utils/concurrency';
 import { isExcluded } from './exclusions';
 import type { SnapshotManager } from './SnapshotManager';
 import type { SyncDatabase } from './SyncDatabase';
@@ -43,6 +44,14 @@ interface LocalFileState {
 	hash: string;
 }
 
+type SyncOperation =
+	| { kind: 'create'; path: string; localHash: string }
+	| { kind: 'update'; path: string; localHash: string }
+	| { kind: 'rename'; oldPath: string; path: string; localHash: string }
+	| { kind: 'delete'; path: string };
+
+const TRANSFER_CONCURRENCY = 3;
+
 export class UploadManager {
 	constructor(
 		private readonly plugin: GDriveSyncPlugin,
@@ -75,37 +84,57 @@ export class UploadManager {
 			}
 		}
 
+		const operations: SyncOperation[] = [];
 		for (const [path, localState] of localByPath.entries()) {
 			const existing = this.syncDb.getRecord(path);
 			if (existing) {
 				if (existing.localHash === localState.hash) {
 					continue;
 				}
-				await this.pushExistingFile(path, localState.hash);
-				summary.updated += 1;
-				changedDb = true;
+				operations.push({ kind: 'update', path, localHash: localState.hash });
 				continue;
 			}
 
 			const renameFrom = this.findRenameSource(localState.hash, deletedCandidates);
 			if (renameFrom) {
-				await this.applyRename(renameFrom, path, localState.hash);
+				operations.push({ kind: 'rename', oldPath: renameFrom, path, localHash: localState.hash });
 				deletedCandidates.delete(renameFrom);
-				summary.renamed += 1;
-				changedDb = true;
 				continue;
 			}
 
-			await this.pushNewFile(path, localState.hash);
-			summary.created += 1;
-			changedDb = true;
+			operations.push({ kind: 'create', path, localHash: localState.hash });
 		}
 
 		for (const deletedPath of deletedCandidates.keys()) {
-			await this.applyDelete(deletedPath);
-			summary.deleted += 1;
-			changedDb = true;
+			operations.push({ kind: 'delete', path: deletedPath });
 		}
+
+		await runWithConcurrencyLimit(operations, TRANSFER_CONCURRENCY, async operation => {
+			if (operation.kind === 'create') {
+				await this.pushNewFile(operation.path, operation.localHash);
+				summary.created += 1;
+				changedDb = true;
+				return;
+			}
+			if (operation.kind === 'update') {
+				await this.pushExistingFile(operation.path, operation.localHash);
+				summary.updated += 1;
+				changedDb = true;
+				return;
+			}
+			if (operation.kind === 'rename') {
+				await this.applyRename(operation.oldPath, operation.path, operation.localHash);
+				summary.renamed += 1;
+				changedDb = true;
+				return;
+			}
+
+			const removed = await this.applyDelete(operation.path);
+			if (removed) {
+				summary.deleted += 1;
+				changedDb = true;
+			}
+		});
 
 		return { summary, changedDb };
 	}
@@ -160,19 +189,18 @@ export class UploadManager {
 	private async collectLocalFileStates(): Promise<LocalFileState[]> {
 		const paths = await this.collectAllLocalPaths();
 		const states: LocalFileState[] = [];
-
-		for (const path of paths) {
+		await runWithConcurrencyLimit(paths, TRANSFER_CONCURRENCY, async path => {
 			const stat = await this.plugin.app.vault.adapter.stat(path);
 			if (this.isPathExcluded(path, stat?.size)) {
-				continue;
+				return;
 			}
 
 			const content = await this.plugin.app.vault.adapter.readBinary(path);
 			const hash = await computeContentHash(content);
 			states.push({ path, hash });
-		}
+		});
 
-		return states;
+		return states.sort((a, b) => a.path.localeCompare(b.path));
 	}
 
 	private async collectAllLocalPaths(): Promise<string[]> {
