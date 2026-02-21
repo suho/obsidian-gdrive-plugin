@@ -1,11 +1,20 @@
-import { Notice, Platform, Plugin } from 'obsidian';
-import { DEFAULT_SETTINGS, GDrivePluginSettings, GDriveSettingTab } from './settings';
+import { Notice, Platform, Plugin, TFile } from 'obsidian';
 import { GoogleAuthManager } from './auth/GoogleAuthManager';
 import { DriveClient } from './gdrive/DriveClient';
-import { SetupWizard } from './ui/SetupWizard';
-import { generateDeviceId } from './utils/deviceId';
+import { DEFAULT_SETTINGS, type GDrivePluginSettings } from './settings';
 import { SyncManager } from './sync/SyncManager';
-import { SyncStatusBar } from './ui/SyncStatusBar';
+import type { ActivityLogEntry } from './types';
+import { ActivityLogModal, ActivityLogView, ACTIVITY_LOG_VIEW_TYPE, type ActivityLogFilter } from './ui/ActivityLogView';
+import { ConfirmModal } from './ui/ConfirmModal';
+import { DeletedFilesModal } from './ui/DeletedFilesModal';
+import { LargestFilesModal } from './ui/LargestFilesModal';
+import { ProgressModal } from './ui/ProgressModal';
+import { GDriveSettingTab } from './ui/SettingTab';
+import { SetupWizard } from './ui/SetupWizard';
+import { SyncStatusBar, type SyncStatusSnapshot } from './ui/SyncStatusBar';
+import { SyncStatusModal } from './ui/SyncStatusModal';
+import { VersionHistoryModal } from './ui/VersionHistoryModal';
+import { generateDeviceId } from './utils/deviceId';
 
 export default class GDriveSyncPlugin extends Plugin {
 	settings: GDrivePluginSettings;
@@ -18,17 +27,12 @@ export default class GDriveSyncPlugin extends Plugin {
 	async onload() {
 		await this.loadSettings();
 
-		// Assign a stable device ID on first run
 		if (!this.settings.deviceId) {
 			this.settings.deviceId = generateDeviceId();
 			await this.saveSettings();
 		}
 
-		// Initialize core services
 		this.authManager = new GoogleAuthManager(this);
-
-		// Register URI handler for mobile OAuth callback as early as possible
-		// to avoid missing deep links during startup/resume.
 		this.registerObsidianProtocolHandler('gdrive-callback', async (params) => {
 			const searchParams = new URLSearchParams();
 			for (const [key, value] of Object.entries(params)) {
@@ -48,20 +52,55 @@ export default class GDriveSyncPlugin extends Plugin {
 		this.syncManager = new SyncManager(this, this.driveClient, this.statusBar);
 		await this.syncManager.initialize();
 
-		// Restore OAuth session from persisted refresh token (non-blocking)
+		this.registerView(ACTIVITY_LOG_VIEW_TYPE, (leaf) => new ActivityLogView(leaf, this));
+
 		if (this.settings.refreshToken) {
 			void this.authManager.restoreSession();
 		}
 
-		// Settings tab
 		this.settingTab = new GDriveSettingTab(this.app, this);
 		this.addSettingTab(this.settingTab);
 
-		// Commands
+		this.addRibbonIcon('cloud', 'Sync now', () => {
+			void this.syncNow();
+		});
+
+		this.registerCommands();
+		this.registerFileMenuEntry();
+
+		if (!this.settings.setupComplete) {
+			this.app.workspace.onLayoutReady(() => {
+				if (Platform.isMobile && !this.settings.refreshToken) {
+					return;
+				}
+				this.openSetupWizard();
+			});
+		} else if (this.settings.syncOnStartup) {
+			void this.syncNow();
+		}
+	}
+
+	onunload() {
+		this.authManager?.destroy();
+	}
+
+	private registerCommands(): void {
 		this.addCommand({
 			id: 'sync-now',
 			name: 'Sync now',
 			callback: () => { void this.syncNow(); },
+		});
+
+		this.addCommand({
+			id: 'push-changes',
+			name: 'Push changes',
+			callback: () => { void this.pushChangesNow(); },
+		});
+
+		this.addCommand({
+			id: 'pull-changes',
+			name: 'Pull changes',
+			callback: () => { void this.pullChangesNow(); },
 		});
 
 		if (!Platform.isMobile) {
@@ -71,6 +110,32 @@ export default class GDriveSyncPlugin extends Plugin {
 				callback: () => { this.openSetupWizard(); },
 			});
 		}
+
+		this.addCommand({
+			id: 'view-activity-log',
+			name: 'View activity log',
+			callback: () => { void this.activateActivityLogView(); },
+		});
+
+		this.addCommand({
+			id: 'view-conflicts',
+			name: 'View conflicts',
+			callback: () => {
+				void this.activateActivityLogView('conflicts');
+			},
+		});
+
+		this.addCommand({
+			id: 'view-deleted-files',
+			name: 'View deleted files',
+			callback: () => { this.openDeletedFilesModal(); },
+		});
+
+		this.addCommand({
+			id: 'view-largest-files',
+			name: 'View largest synced files',
+			callback: () => { this.openLargestFilesModal(); },
+		});
 
 		this.addCommand({
 			id: 'pause-sync',
@@ -102,23 +167,26 @@ export default class GDriveSyncPlugin extends Plugin {
 				this.openPluginSettings();
 			},
 		});
-
-		// Show setup wizard if not yet configured
-		if (!this.settings.setupComplete) {
-			// Defer until workspace is ready
-			this.app.workspace.onLayoutReady(() => {
-				if (Platform.isMobile && !this.settings.refreshToken) {
-					return;
-				}
-				this.openSetupWizard();
-			});
-		} else if (this.settings.syncOnStartup) {
-			void this.syncNow();
-		}
 	}
 
-	onunload() {
-		this.authManager?.destroy();
+	private registerFileMenuEntry(): void {
+		this.registerEvent(this.app.workspace.on('file-menu', (menu, file) => {
+			if (!(file instanceof TFile)) {
+				return;
+			}
+			const record = this.syncManager.syncDb.getRecord(file.path);
+			if (!record?.gDriveFileId) {
+				return;
+			}
+			menu.addItem((item) => {
+				item
+					.setTitle('View Google Drive history')
+					.setIcon('history')
+					.onClick(() => {
+						this.openVersionHistory(file.path, record.gDriveFileId);
+					});
+			});
+		}));
 	}
 
 	async loadSettings() {
@@ -133,7 +201,13 @@ export default class GDriveSyncPlugin extends Plugin {
 		this.settingTab?.display();
 	}
 
-	// ── Public methods called by UI components ────────────────────────
+	handleStatusBarClick(status: SyncStatusSnapshot): void {
+		if (Platform.isMobile) {
+			new SyncStatusModal(this.app, this, status).open();
+			return;
+		}
+		void this.activateActivityLogView(status.status === 'conflict' ? 'conflicts' : 'all');
+	}
 
 	openSetupWizard(): void {
 		if (Platform.isMobile && !this.settings.refreshToken) {
@@ -145,9 +219,7 @@ export default class GDriveSyncPlugin extends Plugin {
 	}
 
 	openPluginSettings(): void {
-		// @ts-ignore — Obsidian's internal setting open API
 		(this.app as unknown as { setting: { open: () => void; openTabById: (id: string) => void } }).setting.open();
-		// @ts-ignore
 		(this.app as unknown as { setting: { open: () => void; openTabById: (id: string) => void } }).setting.openTabById('gdrive-sync');
 	}
 
@@ -177,29 +249,142 @@ export default class GDriveSyncPlugin extends Plugin {
 		);
 	}
 
+	async pushChangesNow(): Promise<void> {
+		const result = await this.syncManager.runPushNow();
+		if (!result) {
+			return;
+		}
+		const total = result.created + result.updated + result.renamed + result.deleted;
+		if (total === 0) {
+			new Notice('Push complete. No local changes found.');
+			return;
+		}
+		new Notice(`Push complete. Created ${result.created}, updated ${result.updated}, renamed ${result.renamed}, deleted ${result.deleted}.`);
+	}
+
+	async pullChangesNow(): Promise<void> {
+		const result = await this.syncManager.runPullNow();
+		if (!result) {
+			return;
+		}
+		if (result.processed === 0) {
+			new Notice('Pull complete. No remote changes found.');
+			return;
+		}
+		new Notice(`Pull complete. Applied ${result.processed} changes.`);
+	}
+
 	async triggerInitialSync(): Promise<void> {
 		await this.syncNow();
 	}
 
-	// Stubs for settings tab buttons — will be wired in later phases
-	activateActivityLogView(): void {
-		new Notice('Activity log coming soon.');
+	async activateActivityLogView(filter: ActivityLogFilter = 'all'): Promise<void> {
+		if (Platform.isMobile) {
+			new ActivityLogModal(this.app, this, filter).open();
+			return;
+		}
+
+		const existingLeaf = this.app.workspace.getLeavesOfType(ACTIVITY_LOG_VIEW_TYPE)[0];
+		const leaf = existingLeaf ?? this.app.workspace.getRightLeaf(false);
+		if (!leaf) {
+			new Notice('Could not open the activity log view.');
+			return;
+		}
+
+		await leaf.setViewState({ type: ACTIVITY_LOG_VIEW_TYPE, active: true });
+		void this.app.workspace.revealLeaf(leaf);
+
+		const view = leaf.view;
+		if (view instanceof ActivityLogView) {
+			view.setFilter(filter);
+		}
+	}
+
+	restoreDeletedFromActivity(entry: ActivityLogEntry): Promise<string> {
+		if (!entry.fileId) {
+			throw new Error('This entry does not include a Google Drive file ID.');
+		}
+		return this.syncManager.restoreFileFromRemoteTrash(entry.fileId, entry.path);
 	}
 
 	openDeletedFilesModal(): void {
-		new Notice('Deleted files recovery coming soon.');
+		new DeletedFilesModal(this.app, this).open();
 	}
 
 	openLargestFilesModal(): void {
-		new Notice('Largest files view coming soon.');
+		new LargestFilesModal(this.app, this).open();
+	}
+
+	openVersionHistory(filePath: string, fileId: string): void {
+		new VersionHistoryModal(this.app, this, filePath, fileId).open();
 	}
 
 	forceFullResync(): void {
-		void this.syncNow();
+		void (async () => {
+			const confirmed = await ConfirmModal.ask(this.app, {
+				title: 'Force full re-sync',
+				message: 'This will run a full re-sync. Continue?',
+				confirmText: 'Run full re-sync',
+				cancelText: 'Cancel',
+				warning: true,
+			});
+			if (!confirmed) {
+				return;
+			}
+
+			let cancelled = false;
+			const progress = new ProgressModal(this.app, {
+				title: 'Full re-sync in progress',
+				total: 7,
+				onCancel: () => {
+					cancelled = true;
+				},
+			});
+			let currentStep = 0;
+			progress.open();
+			progress.updateProgress(0, 'Preparing full sync...');
+			try {
+				const result = await this.syncManager.forceFullResync(
+					(message) => {
+						currentStep = Math.min(currentStep + 1, 7);
+						progress.updateProgress(currentStep, message);
+					},
+					() => cancelled
+				);
+				progress.updateProgress(7, 'Finalizing');
+				progress.finish();
+				if (!result) {
+					if (cancelled) {
+						new Notice('Full re-sync cancelled. Partial sync state was kept.');
+					}
+					return;
+				}
+				const total = result.pulled + result.created + result.updated + result.renamed + result.deleted;
+				new Notice(
+					total > 0
+						? `Full re-sync complete. ${total} changes applied.`
+						: 'Full re-sync complete. No changes found.'
+				);
+			} catch (err) {
+				progress.finish();
+				new Notice(`Full re-sync failed: ${err instanceof Error ? err.message : String(err)}`, 12000);
+			}
+		})();
 	}
 
 	resetSyncState(): void {
 		void (async () => {
+			const confirmed = await ConfirmModal.ask(this.app, {
+				title: 'Reset sync state',
+				message: 'This will clear local sync state. All files will be re-compared on the next sync. Continue?',
+				confirmText: 'Reset sync state',
+				cancelText: 'Cancel',
+				warning: true,
+			});
+			if (!confirmed) {
+				return;
+			}
+
 			this.syncManager.syncDb.reset();
 			await this.syncManager.syncDb.save();
 			this.settings.lastSyncPageToken = '';

@@ -4,6 +4,7 @@ import type { DriveFileWithPath } from '../gdrive/DriveClient';
 import type { DriveFileMetadata } from '../types';
 import { computeContentHash } from '../utils/checksums';
 import { isExcluded } from '../sync/exclusions';
+import { ProgressModal } from './ProgressModal';
 
 type WizardStep = 'authenticate' | 'folder' | 'initial-state' | 'conflict-review' | 'confirm' | 'done';
 type InitialConflictAction = 'keep-local' | 'keep-remote' | 'keep-both';
@@ -709,6 +710,7 @@ export class SetupWizard extends Modal {
 		this.initialSyncProgress = 'Starting initial sync...';
 		this.renderStep();
 
+		let progressModal: ProgressModal | null = null;
 		try {
 			const folderId = this.selectedFolderId || this.plugin.settings.gDriveFolderId;
 			if (!folderId) {
@@ -717,18 +719,36 @@ export class SetupWizard extends Modal {
 
 			const syncDb = this.plugin.syncManager.syncDb;
 			syncDb.reset();
+			const totalOperations = plan.downloads.length + plan.conflicts.length + plan.uploads.length;
+			let completedOperations = 0;
+			progressModal = new ProgressModal(this.app, {
+				title: 'Initial sync in progress',
+				total: Math.max(totalOperations, 1),
+			});
+			progressModal.open();
+			progressModal.updateProgress(0, 'Preparing initial sync...');
 
 			this.initialSyncProgress = `Downloading ${plan.downloads.length} remote files...`;
 			this.renderStep();
 			for (const remoteFile of plan.downloads) {
+				if (progressModal.isCancelled()) {
+					throw new Error('Initial sync cancelled by user.');
+				}
 				await this.applyRemoteFile(remoteFile.path, remoteFile);
+				completedOperations += 1;
+				progressModal.updateProgress(completedOperations, remoteFile.path);
 			}
 
 			this.initialSyncProgress = `Resolving ${plan.conflicts.length} conflicts...`;
 			this.renderStep();
 			for (const conflict of plan.conflicts) {
+				if (progressModal.isCancelled()) {
+					throw new Error('Initial sync cancelled by user.');
+				}
 				if (conflict.action === 'keep-remote') {
 					await this.applyRemoteFile(conflict.path, conflict.remote);
+					completedOperations += 1;
+					progressModal.updateProgress(completedOperations, conflict.path);
 					continue;
 				}
 
@@ -740,13 +760,20 @@ export class SetupWizard extends Modal {
 					await this.uploadLocalFile(keepPath, folderId);
 				}
 
-				await this.applyLocalFile(conflict.path, folderId, conflict.remote.fileId, conflict.remote.mimeType);
+				await this.applyLocalFile(conflict.path, conflict.remote.fileId, conflict.remote.mimeType);
+				completedOperations += 1;
+				progressModal.updateProgress(completedOperations, conflict.path);
 			}
 
 			this.initialSyncProgress = `Uploading ${plan.uploads.length} local files...`;
 			this.renderStep();
 			for (const localFile of plan.uploads) {
+				if (progressModal.isCancelled()) {
+					throw new Error('Initial sync cancelled by user.');
+				}
 				await this.uploadLocalFile(localFile.path, folderId);
+				completedOperations += 1;
+				progressModal.updateProgress(completedOperations, localFile.path);
 			}
 
 			await syncDb.save();
@@ -766,6 +793,7 @@ export class SetupWizard extends Modal {
 		} catch (err) {
 			new Notice(`Initial sync failed: ${err instanceof Error ? err.message : String(err)}`, 12000);
 		} finally {
+			progressModal?.finish();
 			this.initialSyncInProgress = false;
 			this.initialSyncProgress = '';
 			this.renderStep();
@@ -789,7 +817,7 @@ export class SetupWizard extends Modal {
 		await this.saveMarkdownSnapshot(path, content);
 	}
 
-	private async applyLocalFile(path: string, folderId: string, existingRemoteId: string, mimeType: string): Promise<void> {
+	private async applyLocalFile(path: string, existingRemoteId: string, mimeType: string): Promise<void> {
 		if (!await this.plugin.app.vault.adapter.exists(path)) {
 			throw new Error(`File not found: ${path}`);
 		}
@@ -844,13 +872,13 @@ export class SetupWizard extends Modal {
 		const localFiles = new Map<string, LocalScanFile>();
 		const paths = await this.collectAllLocalPaths();
 		for (const path of paths) {
-			if (this.isPathExcluded(path)) {
+			const stat = await this.plugin.app.vault.adapter.stat(path);
+			if (this.isPathExcluded(path, stat?.size)) {
 				continue;
 			}
 
 			const content = await this.plugin.app.vault.adapter.readBinary(path);
 			const hash = await computeContentHash(content);
-			const stat = await this.plugin.app.vault.adapter.stat(path);
 			localFiles.set(path, {
 				path,
 				size: stat?.size ?? content.byteLength,
@@ -869,7 +897,8 @@ export class SetupWizard extends Modal {
 
 		for (const item of remoteWithPaths) {
 			const path = normalizePath(item.path);
-			if (this.isPathExcluded(path)) {
+			const size = Number(item.file.size ?? 0);
+			if (this.isPathExcluded(path, Number.isFinite(size) ? size : undefined)) {
 				continue;
 			}
 
@@ -883,7 +912,7 @@ export class SetupWizard extends Modal {
 				path,
 				fileId: item.file.id,
 				mimeType: item.file.mimeType,
-				size: Number(item.file.size ?? 0),
+				size,
 				modified: parseRemoteModifiedTime(item.file.modifiedTime),
 				hash,
 			});
@@ -968,12 +997,13 @@ export class SetupWizard extends Modal {
 		await this.plugin.syncManager.snapshotManager.saveSnapshot(path, new TextDecoder().decode(content));
 	}
 
-	private isPathExcluded(path: string): boolean {
+	private isPathExcluded(path: string, fileSizeBytes?: number): boolean {
 		return isExcluded(
 			path,
 			this.plugin.settings.excludedPaths,
 			this.plugin.settings,
-			this.plugin.app.vault.configDir
+			this.plugin.app.vault.configDir,
+			fileSizeBytes
 		);
 	}
 

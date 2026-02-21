@@ -1,5 +1,6 @@
 import { App, Notice, Platform, PluginSettingTab, Setting } from 'obsidian';
 import type GDriveSyncPlugin from './main';
+import { ExcludedFoldersModal } from './ui/ExcludedFoldersModal';
 
 export interface GDrivePluginSettings {
 	// Authentication (device-local, never synced to GDrive)
@@ -18,6 +19,7 @@ export interface GDrivePluginSettings {
 	pushQuiescenceMs: number;      // default: 2000 — inactivity delay before pushing a modified file
 	syncOnStartup: boolean;        // default: true
 	wifiOnlySync: boolean;         // default: true on mobile, false on desktop
+	maxFileSizeBytes: number;      // default: 20 MB
 	keepRevisionsForever: boolean; // default: true — set keepRevisionForever on .md uploads
 
 	// Selective sync (device-local — never propagated to other devices)
@@ -64,6 +66,7 @@ export const DEFAULT_SETTINGS: GDrivePluginSettings = {
 	pushQuiescenceMs: 2000,
 	syncOnStartup: true,
 	wifiOnlySync: Platform.isMobile,
+	maxFileSizeBytes: 20 * 1024 * 1024,
 	keepRevisionsForever: true,
 
 	// Selective sync
@@ -254,6 +257,10 @@ export class GDriveSettingTab extends PluginSettingTab {
 				);
 		}
 
+		if (isConnected) {
+			this.renderStorageUsage(containerEl);
+		}
+
 		// ── Sync behavior ─────────────────────────────────────────────
 		new Setting(containerEl).setName('Sync behavior').setHeading();
 
@@ -322,19 +329,8 @@ export class GDriveSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName('Markdown files')
-			.setDesc('How to resolve conflicts in .md files when both local and remote have changed.')
-			.addDropdown(drop =>
-				drop
-					.addOption('auto-merge', 'Auto-merge (recommended)')
-					.addOption('conflict-file', 'Create conflict file')
-					.addOption('local-wins', 'Local wins')
-					.addOption('remote-wins', 'Remote wins')
-					.setValue(this.plugin.settings.mdConflictStrategy)
-					.onChange(async val => {
-						this.plugin.settings.mdConflictStrategy = val as GDrivePluginSettings['mdConflictStrategy'];
-						await this.plugin.saveSettings();
-					})
-			);
+			.setDesc('How to resolve conflicts in .md files when both local and remote have changed.');
+		this.renderMarkdownConflictStrategyRadios(containerEl);
 
 		new Setting(containerEl)
 			.setName('Binary files')
@@ -361,9 +357,10 @@ export class GDriveSettingTab extends PluginSettingTab {
 			.setName('Sync images')
 			.setDesc('Includes common image file formats.')
 			.addToggle(t =>
-				t.setValue(this.plugin.settings.syncImages).onChange(async v => {
-					this.plugin.settings.syncImages = v;
-					await this.plugin.saveSettings();
+				t.setValue(this.plugin.settings.syncImages).onChange(v => {
+					void this.updateSelectiveSyncSettings(() => {
+						this.plugin.settings.syncImages = v;
+					});
 				})
 			);
 
@@ -371,9 +368,10 @@ export class GDriveSettingTab extends PluginSettingTab {
 			.setName('Sync audio')
 			.setDesc('Includes common audio formats such as mp3, wav, m4a, ogg, and flac.')
 			.addToggle(t =>
-				t.setValue(this.plugin.settings.syncAudio).onChange(async v => {
-					this.plugin.settings.syncAudio = v;
-					await this.plugin.saveSettings();
+				t.setValue(this.plugin.settings.syncAudio).onChange(v => {
+					void this.updateSelectiveSyncSettings(() => {
+						this.plugin.settings.syncAudio = v;
+					});
 				})
 			);
 
@@ -381,18 +379,20 @@ export class GDriveSettingTab extends PluginSettingTab {
 			.setName('Sync video')
 			.setDesc('Includes common video formats such as mp4, mov, mkv, and webm.')
 			.addToggle(t =>
-				t.setValue(this.plugin.settings.syncVideo).onChange(async v => {
-					this.plugin.settings.syncVideo = v;
-					await this.plugin.saveSettings();
+				t.setValue(this.plugin.settings.syncVideo).onChange(v => {
+					void this.updateSelectiveSyncSettings(() => {
+						this.plugin.settings.syncVideo = v;
+					});
 				})
 			);
 
 		new Setting(containerEl)
 			.setName('Sync PDF files')
 			.addToggle(t =>
-				t.setValue(this.plugin.settings.syncPdfs).onChange(async v => {
-					this.plugin.settings.syncPdfs = v;
-					await this.plugin.saveSettings();
+				t.setValue(this.plugin.settings.syncPdfs).onChange(v => {
+					void this.updateSelectiveSyncSettings(() => {
+						this.plugin.settings.syncPdfs = v;
+					});
 				})
 			);
 
@@ -400,9 +400,41 @@ export class GDriveSettingTab extends PluginSettingTab {
 			.setName('Sync other file types')
 			.setDesc('Includes canvas files, drawing files, and other file types.')
 			.addToggle(t =>
-				t.setValue(this.plugin.settings.syncOtherTypes).onChange(async v => {
-					this.plugin.settings.syncOtherTypes = v;
-					await this.plugin.saveSettings();
+				t.setValue(this.plugin.settings.syncOtherTypes).onChange(v => {
+					void this.updateSelectiveSyncSettings(() => {
+						this.plugin.settings.syncOtherTypes = v;
+					});
+				})
+			);
+
+		new Setting(containerEl)
+			.setName('Max file size')
+			.setDesc('Skip files larger than this size on this device.')
+			.addSlider(slider =>
+				slider
+					.setLimits(1, 200, 1)
+					.setValue(Math.round(this.plugin.settings.maxFileSizeBytes / (1024 * 1024)))
+					.setDynamicTooltip()
+					.onChange(value => {
+						void this.updateSelectiveSyncSettings(() => {
+							this.plugin.settings.maxFileSizeBytes = value * 1024 * 1024;
+						});
+					})
+			);
+
+		const excludedSummary = this.plugin.settings.excludedPaths.length === 0
+			? 'No excluded folders configured.'
+			: `${this.plugin.settings.excludedPaths.length} excluded folders configured.`;
+		new Setting(containerEl)
+			.setName('Excluded folders')
+			.setDesc(excludedSummary)
+			.addButton(button =>
+				button.setButtonText('Manage').onClick(() => {
+					new ExcludedFoldersModal(this.app, this.plugin.settings.excludedPaths, (paths) => {
+						void this.updateSelectiveSyncSettings(() => {
+							this.plugin.settings.excludedPaths = paths;
+						}, true);
+					}).open();
 				})
 			);
 
@@ -413,9 +445,10 @@ export class GDriveSettingTab extends PluginSettingTab {
 			.setName('Sync editor settings')
 			.setDesc('Sync app.json with editor, file, and link settings.')
 			.addToggle(t =>
-				t.setValue(this.plugin.settings.syncEditorSettings).onChange(async v => {
-					this.plugin.settings.syncEditorSettings = v;
-					await this.plugin.saveSettings();
+				t.setValue(this.plugin.settings.syncEditorSettings).onChange(v => {
+					void this.updateSelectiveSyncSettings(() => {
+						this.plugin.settings.syncEditorSettings = v;
+					});
 				})
 			);
 
@@ -423,9 +456,10 @@ export class GDriveSettingTab extends PluginSettingTab {
 			.setName('Sync appearance')
 			.setDesc('Sync appearance.json, themes, and CSS snippets.')
 			.addToggle(t =>
-				t.setValue(this.plugin.settings.syncAppearance).onChange(async v => {
-					this.plugin.settings.syncAppearance = v;
-					await this.plugin.saveSettings();
+				t.setValue(this.plugin.settings.syncAppearance).onChange(v => {
+					void this.updateSelectiveSyncSettings(() => {
+						this.plugin.settings.syncAppearance = v;
+					});
 				})
 			);
 
@@ -433,9 +467,10 @@ export class GDriveSettingTab extends PluginSettingTab {
 			.setName('Sync hotkeys')
 			.setDesc('Sync hotkeys.json.')
 			.addToggle(t =>
-				t.setValue(this.plugin.settings.syncHotkeys).onChange(async v => {
-					this.plugin.settings.syncHotkeys = v;
-					await this.plugin.saveSettings();
+				t.setValue(this.plugin.settings.syncHotkeys).onChange(v => {
+					void this.updateSelectiveSyncSettings(() => {
+						this.plugin.settings.syncHotkeys = v;
+					});
 				})
 			);
 
@@ -443,9 +478,10 @@ export class GDriveSettingTab extends PluginSettingTab {
 			.setName('Sync community plugin list')
 			.setDesc('Sync community-plugins.json only, not plugin binaries.')
 			.addToggle(t =>
-				t.setValue(this.plugin.settings.syncCommunityPluginList).onChange(async v => {
-					this.plugin.settings.syncCommunityPluginList = v;
-					await this.plugin.saveSettings();
+				t.setValue(this.plugin.settings.syncCommunityPluginList).onChange(v => {
+					void this.updateSelectiveSyncSettings(() => {
+						this.plugin.settings.syncCommunityPluginList = v;
+					});
 				})
 			);
 
@@ -473,7 +509,7 @@ export class GDriveSettingTab extends PluginSettingTab {
 			.setName('View activity log')
 			.addButton(btn =>
 				btn.setButtonText('Open').onClick(() => {
-					this.plugin.activateActivityLogView();
+					void this.plugin.activateActivityLogView();
 				})
 			);
 
@@ -516,6 +552,116 @@ export class GDriveSettingTab extends PluginSettingTab {
 						this.plugin.resetSyncState();
 					})
 			);
+
+		new Setting(containerEl)
+			.setName('Export debug info')
+			.setDesc('Copy local diagnostic paths and status summary to clipboard.')
+			.addButton(btn =>
+				btn.setButtonText('Export').onClick(() => {
+					void this.exportDebugInfo();
+				})
+			);
+	}
+
+	private renderMarkdownConflictStrategyRadios(containerEl: HTMLElement): void {
+		const choices: Array<{
+			value: GDrivePluginSettings['mdConflictStrategy'];
+			label: string;
+			description: string;
+		}> = [
+			{
+				value: 'auto-merge',
+				label: 'Auto-merge (recommended)',
+				description: 'Try a three-way merge first and show conflict markers if overlap remains.',
+			},
+			{
+				value: 'conflict-file',
+				label: 'Create conflict file',
+				description: 'Keep local and write the remote version to a .sync-conflict file.',
+			},
+			{
+				value: 'local-wins',
+				label: 'Local wins',
+				description: 'Keep local content and overwrite the remote revision.',
+			},
+			{
+				value: 'remote-wins',
+				label: 'Remote wins',
+				description: 'Replace local content with the remote revision.',
+			},
+		];
+
+		const fieldset = containerEl.createEl('fieldset', { cls: 'gdrive-sync-radio-group' });
+		fieldset.createEl('legend', { text: 'Markdown strategy' });
+
+		for (const choice of choices) {
+			const row = fieldset.createDiv({ cls: 'gdrive-sync-radio-row' });
+			const input = row.createEl('input', { type: 'radio' });
+			input.name = 'gdrive-sync-md-conflict-strategy';
+			input.value = choice.value;
+			input.checked = this.plugin.settings.mdConflictStrategy === choice.value;
+
+			const textWrap = row.createDiv({ cls: 'gdrive-sync-radio-text' });
+			textWrap.createEl('div', { text: choice.label });
+			textWrap.createEl('div', { text: choice.description, cls: 'gdrive-sync-radio-desc' });
+
+			input.addEventListener('change', () => {
+				if (!input.checked) {
+					return;
+				}
+				void (async () => {
+					this.plugin.settings.mdConflictStrategy = choice.value;
+					await this.plugin.saveSettings();
+				})();
+			});
+		}
+	}
+
+	private renderStorageUsage(containerEl: HTMLElement): void {
+		const descEl = containerEl.createDiv({ text: 'Storage usage: loading...' });
+		descEl.addClass('gdrive-sync-storage-usage');
+		void (async () => {
+			try {
+				const quota = await this.plugin.driveClient.getStorageQuota();
+				const usedMb = quota.used / (1024 * 1024);
+				const limitMb = quota.limit / (1024 * 1024);
+				descEl.setText(`Storage usage: ${usedMb.toFixed(1)} MB of ${limitMb.toFixed(1)} MB`);
+			} catch {
+				descEl.setText('Storage usage: unavailable');
+			}
+		})();
+	}
+
+	private async updateSelectiveSyncSettings(update: () => void, refreshAfterSave = false): Promise<void> {
+		const previous = this.plugin.syncManager.captureSelectiveSyncSnapshot();
+		update();
+		await this.plugin.saveSettings();
+		const queued = await this.plugin.syncManager.handleSelectiveSyncSettingsChange(previous);
+		if (queued > 0) {
+			new Notice(`${queued} newly included files were queued for sync.`);
+		}
+		if (refreshAfterSave) {
+			this.display();
+		}
+	}
+
+	private async exportDebugInfo(): Promise<void> {
+		const debugInfo = [
+			`pluginId=${this.plugin.manifest.id}`,
+			`syncDbPath=${this.plugin.syncManager.syncDb.getDatabasePath()}`,
+			`activityLogPath=${this.plugin.syncManager.getActivityLogPath()}`,
+			`pendingChanges=${this.plugin.syncManager.getPendingChangeCount()}`,
+			`conflictAlerts=${this.plugin.syncManager.getConflictAlertCount()}`,
+			`lastSyncPageToken=${this.plugin.settings.lastSyncPageToken ? '[set]' : '[empty]'}`,
+			`setupComplete=${String(this.plugin.settings.setupComplete)}`,
+		].join('\\n');
+
+		try {
+			await navigator.clipboard.writeText(debugInfo);
+			new Notice('Debug info copied.');
+		} catch {
+			new Notice('Copy failed. You can run export from desktop or copy manually.');
+		}
 	}
 
 	private async copyToClipboard(value: string): Promise<void> {

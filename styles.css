@@ -8,7 +8,18 @@ If your plugin does not need CSS, delete this file.
 */
 
 .gdrive-sync-statusbar {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
 	font-weight: 600;
+}
+
+.gdrive-sync-statusbar-icon {
+	width: 16px;
+	height: 16px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
 }
 
 .gdrive-sync-status--synced {
@@ -23,6 +34,10 @@ If your plugin does not need CSS, delete this file.
 	color: var(--color-red);
 }
 
+.gdrive-sync-status--conflict {
+	color: var(--color-orange);
+}
+
 .gdrive-sync-status--pending {
 	color: var(--color-orange);
 }
@@ -33,6 +48,20 @@ If your plugin does not need CSS, delete this file.
 
 .gdrive-sync-status--paused {
 	color: var(--text-accent);
+}
+
+.gdrive-sync-spin {
+	animation: gdrive-sync-rotate 1s linear infinite;
+}
+
+@keyframes gdrive-sync-rotate {
+	from {
+		transform: rotate(0deg);
+	}
+
+	to {
+		transform: rotate(360deg);
+	}
 }
 
 .gdrive-sync-button-row {
@@ -103,8 +132,211 @@ If your plugin does not need CSS, delete this file.
 	width: 100%;
 }
 
+.gdrive-sync-activity-controls {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
+
+.gdrive-sync-activity-filters {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+}
+
+.gdrive-sync-activity-list {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	margin-top: 8px;
+}
+
+.gdrive-sync-activity-entry {
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 8px;
+	padding: 8px;
+	background: var(--background-secondary);
+}
+
+.gdrive-sync-activity-entry-head {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	font-size: 0.85rem;
+	color: var(--text-muted);
+	margin-bottom: 4px;
+}
+
+.gdrive-sync-activity-icon {
+	font-size: 0.72rem;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 4px;
+	padding: 1px 4px;
+	background: var(--background-primary-alt);
+}
+
+.gdrive-sync-activity-action {
+	font-weight: 600;
+	color: var(--text-normal);
+}
+
+.gdrive-sync-activity-path {
+	font-family: var(--font-monospace);
+	font-size: 0.85rem;
+	word-break: break-word;
+}
+
+.gdrive-sync-activity-detail {
+	margin-top: 4px;
+	font-size: 0.82rem;
+	color: var(--text-muted);
+	white-space: pre-wrap;
+}
+
+.gdrive-sync-activity-error {
+	margin-top: 4px;
+	color: var(--color-red);
+	font-size: 0.82rem;
+}
+
+.gdrive-sync-linkish {
+	margin-top: 6px;
+	padding: 0;
+	background: none;
+	border: 0;
+	color: var(--text-accent);
+	cursor: pointer;
+}
+
+.is-hidden {
+	display: none;
+}
+
+.gdrive-sync-table {
+	width: 100%;
+	border-collapse: collapse;
+	margin-top: 8px;
+}
+
+.gdrive-sync-table th,
+.gdrive-sync-table td {
+	border: 1px solid var(--background-modifier-border);
+	padding: 6px 8px;
+	vertical-align: top;
+}
+
+.gdrive-sync-history-split {
+	display: grid;
+	grid-template-columns: minmax(180px, 240px) 1fr;
+	gap: 12px;
+}
+
+.gdrive-sync-history-left {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	max-height: 380px;
+	overflow: auto;
+}
+
+.gdrive-sync-history-revision-item {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+}
+
+.gdrive-sync-history-revision-meta {
+	color: var(--text-muted);
+	font-size: 0.75rem;
+	padding-left: 2px;
+}
+
+.gdrive-sync-history-right {
+	min-width: 0;
+}
+
+.gdrive-sync-history-preview {
+	margin-top: 8px;
+	padding: 10px;
+	background: var(--background-secondary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 6px;
+	max-height: 380px;
+	overflow: auto;
+	white-space: pre-wrap;
+	word-break: break-word;
+}
+
+.gdrive-sync-progress-bar {
+	width: 100%;
+	margin-top: 4px;
+}
+
+.gdrive-sync-progress-meta {
+	margin-top: 8px;
+	color: var(--text-muted);
+}
+
+.gdrive-sync-progress-file {
+	margin-top: 4px;
+	font-family: var(--font-monospace);
+	font-size: 0.82rem;
+	word-break: break-word;
+}
+
+.gdrive-sync-folder-list {
+	max-height: 320px;
+	overflow: auto;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 8px;
+	padding: 8px;
+	margin-top: 8px;
+}
+
+.gdrive-sync-folder-row {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 3px 0;
+}
+
+.gdrive-sync-storage-usage {
+	color: var(--text-muted);
+	margin-bottom: 8px;
+}
+
+.gdrive-sync-radio-group {
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 8px;
+	padding: 8px 10px;
+	margin-bottom: 12px;
+}
+
+.gdrive-sync-radio-row {
+	display: grid;
+	grid-template-columns: auto 1fr;
+	gap: 8px;
+	align-items: start;
+	padding: 4px 0;
+}
+
+.gdrive-sync-radio-text {
+	display: flex;
+	flex-direction: column;
+	gap: 1px;
+}
+
+.gdrive-sync-radio-desc {
+	font-size: 0.78rem;
+	color: var(--text-muted);
+}
+
 @media (max-width: 900px) {
 	.gdrive-sync-conflict-split {
+		grid-template-columns: 1fr;
+	}
+
+	.gdrive-sync-history-split {
 		grid-template-columns: 1fr;
 	}
 }

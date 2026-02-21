@@ -9,6 +9,7 @@ type SelectiveSettings = Pick<
 	| 'syncVideo'
 	| 'syncPdfs'
 	| 'syncOtherTypes'
+	| 'maxFileSizeBytes'
 	| 'syncEditorSettings'
 	| 'syncAppearance'
 	| 'syncHotkeys'
@@ -115,6 +116,13 @@ function isTypeExcluded(path: string, settings: SelectiveSettings): boolean {
 	return false;
 }
 
+function isOverMaxFileSize(fileSizeBytes: number | undefined, settings: SelectiveSettings): boolean {
+	if (typeof fileSizeBytes !== 'number' || fileSizeBytes <= 0) {
+		return false;
+	}
+	return fileSizeBytes > settings.maxFileSizeBytes;
+}
+
 function isVaultConfigExcluded(path: string, settings: SelectiveSettings, configDir: string): boolean {
 	const normalizedPath = normalize(path);
 	const normalizedConfigDir = normalizePrefix(configDir);
@@ -130,7 +138,8 @@ export function isExcluded(
 	path: string,
 	userExclusions: string[],
 	settings: SelectiveSettings,
-	configDir: string
+	configDir: string,
+	fileSizeBytes?: number
 ): boolean {
 	const normalizedPath = normalize(path);
 	const normalizedConfigDir = normalizePrefix(configDir);
@@ -141,5 +150,6 @@ export function isExcluded(
 		return isVaultConfigExcluded(normalizedPath, settings, normalizedConfigDir);
 	}
 	if (isTypeExcluded(normalizedPath, settings)) return true;
+	if (isOverMaxFileSize(fileSizeBytes, settings)) return true;
 	return false;
 }

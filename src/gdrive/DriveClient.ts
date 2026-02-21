@@ -157,6 +157,22 @@ export class DriveClient {
 		this.assertOk(response.status, response.text);
 	}
 
+	/**
+	 * Restore a trashed file.
+	 */
+	async restoreFileFromTrash(fileId: string): Promise<void> {
+		const response = await this.requestWithAuth(token => ({
+			url: `${API_BASE}/files/${fileId}?fields=id,trashed`,
+			method: 'PATCH',
+			headers: {
+				Authorization: `Bearer ${token}`,
+				'Content-Type': 'application/json',
+			},
+			body: JSON.stringify({ trashed: false }),
+		}));
+		this.assertOk(response.status, response.text);
+	}
+
 	/** Backward-compatible alias used by the Phase 1 API checklist. */
 	async deleteFile(fileId: string): Promise<void> {
 		await this.trashFile(fileId);
@@ -442,7 +458,7 @@ export class DriveClient {
 	 */
 	async listRevisions(fileId: string): Promise<DriveRevision[]> {
 		const response = await this.requestWithAuth(token => ({
-			url: `${API_BASE}/files/${fileId}/revisions?fields=revisions(id,modifiedTime,mimeType,size,keepForever)`,
+			url: `${API_BASE}/files/${fileId}/revisions?fields=revisions(id,modifiedTime,mimeType,size,keepForever,lastModifyingUser(displayName,emailAddress,me))`,
 			headers: { Authorization: `Bearer ${token}` },
 		}));
 		this.assertOk(response.status, response.text);

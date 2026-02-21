@@ -95,7 +95,8 @@ export class DownloadManager {
 
 		const renamedPath = existing ? this.resolveRenamePath(existing.localPath, remoteFile.name) : null;
 		const targetPath = renamedPath ?? localPath;
-		if (this.isPathExcluded(targetPath)) {
+		const remoteSizeBytes = remoteFile.size ? Number(remoteFile.size) : undefined;
+		if (this.isPathExcluded(targetPath, Number.isFinite(remoteSizeBytes) ? remoteSizeBytes : undefined)) {
 			return 'skipped';
 		}
 
@@ -321,12 +322,13 @@ export class DownloadManager {
 		return this.plugin.app.workspace.getActiveFile()?.path === path;
 	}
 
-	private isPathExcluded(path: string): boolean {
+	private isPathExcluded(path: string, fileSizeBytes?: number): boolean {
 		return isExcluded(
 			path,
 			this.plugin.settings.excludedPaths,
 			this.plugin.settings,
-			this.plugin.app.vault.configDir
+			this.plugin.app.vault.configDir,
+			fileSizeBytes
 		);
 	}
 

@@ -218,94 +218,94 @@
 
 ---
 
-## Phase 5 — UI Polish + Advanced Features
+## Phase 5 — UI Polish + Advanced Features ✅
 
 ### 5.1 Activity Log Sidebar
-- [ ] Create `src/ui/ActivityLogView.ts` — extends `ItemView`
-- [ ] Register view type in `main.ts`
-- [ ] Implement activity log data structure (circular buffer, max 1000 entries)
-- [ ] Persist recent log entries to disk (survive plugin reload)
-- [ ] Implement filter buttons: All / Pushed / Pulled / Merged / Conflicts / Errors / Deleted
-- [ ] Implement search box (filter by file path)
-- [ ] Show entries: timestamp, direction icon (↑↓⚡🗑), action, file path
-- [ ] Merge entries: expandable "View merge diff" link
-- [ ] Deleted entries: "Restore from Drive" action link
-- [ ] Register `view-activity-log` command to open/focus the sidebar
+- [x] Create `src/ui/ActivityLogView.ts` — extends `ItemView`
+- [x] Register view type in `main.ts`
+- [x] Implement activity log data structure (circular buffer, max 1000 entries)
+- [x] Persist recent log entries to disk (survive plugin reload)
+- [x] Implement filter buttons: All / Pushed / Pulled / Merged / Conflicts / Errors / Deleted
+- [x] Implement search box (filter by file path)
+- [x] Show entries: timestamp, direction icon (↑↓⚡🗑), action, file path
+- [x] Merge entries: expandable "View merge diff" link
+- [x] Deleted entries: "Restore from Drive" action link
+- [x] Register `view-activity-log` command to open/focus the sidebar
 
 ### 5.2 Version History Modal
-- [ ] Create `src/ui/VersionHistoryModal.ts`
-- [ ] Fetch revisions from GDrive Revisions API for the selected file
-- [ ] Left panel: list of revisions with timestamps + device info
-- [ ] Right panel: content preview of selected revision
-- [ ] Diff toggle: compare selected revision vs current local version
-- [ ] "Restore this version" button → download revision content → overwrite local → push to remote
-- [ ] Add file menu item: right-click file → "View Google Drive history"
+- [x] Create `src/ui/VersionHistoryModal.ts`
+- [x] Fetch revisions from GDrive Revisions API for the selected file
+- [x] Left panel: list of revisions with timestamps + device info
+- [x] Right panel: content preview of selected revision
+- [x] Diff toggle: compare selected revision vs current local version
+- [x] "Restore this version" button → download revision content → overwrite local → push to remote
+- [x] Add file menu item: right-click file → "View Google Drive history"
 
 ### 5.3 Deleted Files Modal
-- [ ] Create `src/ui/DeletedFilesModal.ts`
-- [ ] List files from local trash (`.obsidian/plugins/gdrive-sync/trash/`)
-- [ ] List files from GDrive Trash (API: `files.list` with `trashed=true`)
-- [ ] Show: file path, deletion date, source (local/remote)
-- [ ] "Restore" button: move file back to original location + update sync state
-- [ ] Register `view-deleted-files` command
+- [x] Create `src/ui/DeletedFilesModal.ts`
+- [x] List files from local trash (`.obsidian/plugins/gdrive-sync/trash/`)
+- [x] List files from GDrive Trash (API: `files.list` with `trashed=true`)
+- [x] Show: file path, deletion date, source (local/remote)
+- [x] "Restore" button: move file back to original location + update sync state
+- [x] Register `view-deleted-files` command
 
 ### 5.4 Largest Files Modal
-- [ ] Create `src/ui/LargestFilesModal.ts`
-- [ ] Query GDrive API: `files.list` sorted by `quotaBytesUsed desc`, top 20
-- [ ] Show: file path, size, last modified
-- [ ] Link to GDrive storage settings: `drive.google.com/settings/storage`
-- [ ] Register `view-largest-files` command
+- [x] Create `src/ui/LargestFilesModal.ts`
+- [x] Query GDrive API: `files.list` sorted by `quotaBytesUsed desc`, top 20
+- [x] Show: file path, size, last modified
+- [x] Link to GDrive storage settings: `drive.google.com/settings/storage`
+- [x] Register `view-largest-files` command
 
 ### 5.5 Selective Sync Settings UI
-- [ ] Add file type toggles to SettingTab: images, audio, video, PDFs, other types
-- [ ] Add max file size slider
-- [ ] Add "Excluded folders" button → opens folder picker modal
-- [ ] Add note: "These settings apply only to this device"
-- [ ] On toggle change: re-evaluate exclusions, queue any newly-included files for push
+- [x] Add file type toggles to SettingTab: images, audio, video, PDFs, other types
+- [x] Add max file size slider
+- [x] Add "Excluded folders" button → opens folder picker modal
+- [x] Add note: "These settings apply only to this device"
+- [x] On toggle change: re-evaluate exclusions, queue any newly-included files for push
 
 ### 5.6 Vault Config Sync
-- [ ] Implement granular `.obsidian/` sync toggles (editor settings, appearance, hotkeys, community plugin list)
-- [ ] Map each toggle to specific `.obsidian/` files:
-  - [ ] Editor settings → `app.json`
-  - [ ] Appearance → `appearance.json`, `themes/`, `snippets/`
-  - [ ] Hotkeys → `hotkeys.json`
-  - [ ] Community plugin list → `community-plugins.json` (list only, not binaries)
-- [ ] **Never sync:** `workspace.json`, `workspace-mobile.json`, `cache/`, `plugins/*/main.js`
+- [x] Implement granular `.obsidian/` sync toggles (editor settings, appearance, hotkeys, community plugin list)
+- [x] Map each toggle to specific `.obsidian/` files:
+  - [x] Editor settings → `app.json`
+  - [x] Appearance → `appearance.json`, `themes/`, `snippets/`
+  - [x] Hotkeys → `hotkeys.json`
+  - [x] Community plugin list → `community-plugins.json` (list only, not binaries)
+- [x] **Never sync:** `workspace.json`, `workspace-mobile.json`, `cache/`, `plugins/*/main.js`
 
 ### 5.7 Progress Modal
-- [ ] Create `src/ui/ProgressModal.ts`
-- [ ] Show during initial sync and force full re-sync
-- [ ] Display: progress bar, file count (X of Y), current file name, elapsed time
-- [ ] Cancel button: stop sync, keep partial state
-- [ ] Prevent modal dismissal by clicking outside (only Cancel button)
+- [x] Create `src/ui/ProgressModal.ts`
+- [x] Show during initial sync and force full re-sync
+- [x] Display: progress bar, file count (X of Y), current file name, elapsed time
+- [x] Cancel button: stop sync, keep partial state
+- [x] Prevent modal dismissal by clicking outside (only Cancel button)
 
 ### 5.8 Full Settings Tab
-- [ ] Rewrite `src/ui/SettingTab.ts` with all sections from PLANS.md section 7.2
-- [ ] Account section: connected email, storage usage, remote folder, Sign Out
-- [ ] Sync behavior section: auto-sync, pull interval, quiescence delay, sync on startup, Wi-Fi only
-- [ ] Conflict resolution section: markdown strategy radio, binary strategy dropdown
-- [ ] Selective sync section: file type toggles, max size, excluded folders
-- [ ] Vault config sync section: granular toggles
-- [ ] Version history section: keep revisions forever toggle + warning
-- [ ] Advanced section: buttons for activity log, deleted files, largest files, force re-sync, reset state, export debug
+- [x] Rewrite `src/ui/SettingTab.ts` with all sections from PLANS.md section 7.2
+- [x] Account section: connected email, storage usage, remote folder, Sign Out
+- [x] Sync behavior section: auto-sync, pull interval, quiescence delay, sync on startup, Wi-Fi only
+- [x] Conflict resolution section: markdown strategy radio, binary strategy dropdown
+- [x] Selective sync section: file type toggles, max size, excluded folders
+- [x] Vault config sync section: granular toggles
+- [x] Version history section: keep revisions forever toggle + warning
+- [x] Advanced section: buttons for activity log, deleted files, largest files, force re-sync, reset state, export debug
 
 ### 5.9 All Command Registrations
-- [ ] Register `push-changes` command
-- [ ] Register `pull-changes` command
-- [ ] Register `view-activity-log` command
-- [ ] Register `view-conflicts` command
-- [ ] Register `view-deleted-files` command
-- [ ] Register `view-largest-files` command
-- [ ] Register `open-settings` command
-- [ ] Add ribbon icon (cloud) → trigger `sync-now`
+- [x] Register `push-changes` command
+- [x] Register `pull-changes` command
+- [x] Register `view-activity-log` command
+- [x] Register `view-conflicts` command
+- [x] Register `view-deleted-files` command
+- [x] Register `view-largest-files` command
+- [x] Register `open-settings` command
+- [x] Add ribbon icon (cloud) → trigger `sync-now`
 
 ### 5.10 Status Bar Enhancement
-- [ ] Add all 6 states (synced, syncing, pending, offline, error, conflict)
-- [ ] Animated spinner for syncing state
-- [ ] Click → open Activity Log sidebar (desktop) or status modal (mobile)
-- [ ] Show file count in tooltip during sync
-- [ ] Show queued change count when pending
-- [ ] Persistent error/conflict badge until resolved
+- [x] Add all 6 states (synced, syncing, pending, offline, error, conflict)
+- [x] Animated spinner for syncing state
+- [x] Click → open Activity Log sidebar (desktop) or status modal (mobile)
+- [x] Show file count in tooltip during sync
+- [x] Show queued change count when pending
+- [x] Persistent error/conflict badge until resolved
 
 ---
 

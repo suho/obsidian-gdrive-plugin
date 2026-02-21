@@ -46,6 +46,8 @@ export interface ActivityLogEntry {
 	path: string;
 	detail?: string;         // e.g. "Merged 3 chunks cleanly"
 	error?: string;
+	fileId?: string;         // Optional Google Drive file ID for restore actions
+	source?: 'local' | 'remote' | 'system';
 }
 
 export type ActivityAction =
@@ -70,6 +72,12 @@ export interface DriveFileMetadata {
 	trashed?: boolean;
 }
 
+export interface DriveRevisionActor {
+	displayName?: string;
+	emailAddress?: string;
+	me?: boolean;
+}
+
 // GDrive revision metadata
 export interface DriveRevision {
 	id: string;
@@ -77,6 +85,7 @@ export interface DriveRevision {
 	mimeType: string;
 	size?: string;
 	keepForever?: boolean;
+	lastModifyingUser?: DriveRevisionActor;
 }
 
 export interface MergeConflictRegion {

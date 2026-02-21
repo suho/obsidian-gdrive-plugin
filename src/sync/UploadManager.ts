@@ -116,7 +116,8 @@ export class UploadManager {
 			return 'skipped';
 		}
 
-		if (this.isPathExcluded(normalizedPath)) {
+		const stat = await this.plugin.app.vault.adapter.stat(normalizedPath);
+		if (this.isPathExcluded(normalizedPath, stat?.size)) {
 			return 'skipped';
 		}
 
@@ -142,7 +143,8 @@ export class UploadManager {
 			return false;
 		}
 
-		if (this.isPathExcluded(normalizedNewPath)) {
+		const stat = await this.plugin.app.vault.adapter.stat(normalizedNewPath);
+		if (this.isPathExcluded(normalizedNewPath, stat?.size)) {
 			return false;
 		}
 
@@ -160,7 +162,8 @@ export class UploadManager {
 		const states: LocalFileState[] = [];
 
 		for (const path of paths) {
-			if (this.isPathExcluded(path)) {
+			const stat = await this.plugin.app.vault.adapter.stat(path);
+			if (this.isPathExcluded(path, stat?.size)) {
 				continue;
 			}
 
@@ -333,12 +336,13 @@ export class UploadManager {
 		return this.plugin.settings.keepRevisionsForever && path.toLowerCase().endsWith('.md');
 	}
 
-	private isPathExcluded(path: string): boolean {
+	private isPathExcluded(path: string, fileSizeBytes?: number): boolean {
 		return isExcluded(
 			path,
 			this.plugin.settings.excludedPaths,
 			this.plugin.settings,
-			this.plugin.app.vault.configDir
+			this.plugin.app.vault.configDir,
+			fileSizeBytes
 		);
 	}
 

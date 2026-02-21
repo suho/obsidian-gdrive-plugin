@@ -144,7 +144,7 @@ export class ConflictResolver {
 		await this.updateRemote(path, params, mergedContent);
 
 		const mergedHash = await computeContentHash(mergedContent);
-		this.logConflict(path, `Config merged (${localHash.slice(0, 8)} + ${remoteHash.slice(0, 8)}).`);
+		this.logActivity('merged', path, `Config merged (${localHash.slice(0, 8)} + ${remoteHash.slice(0, 8)}).`);
 		return {
 			handled: true,
 			syncedContent: mergedContent,
@@ -196,7 +196,7 @@ export class ConflictResolver {
 			const detail = mergeResult.hasConflicts
 				? 'Merged with inline conflict markers.'
 				: 'Merged automatically.';
-			this.logConflict(path, detail);
+			this.logActivity(mergeResult.hasConflicts ? 'conflict' : 'merged', path, detail);
 			return {
 				handled: true,
 				syncedContent: mergedContent,
@@ -252,7 +252,7 @@ export class ConflictResolver {
 		const detail = strategy === 'conflict-file'
 			? 'Conflict file created and local version kept.'
 			: 'Both versions kept using a conflict file.';
-		this.logConflict(path, `${detail} Local=${localHash.slice(0, 8)} Remote=${remoteHash.slice(0, 8)}.`);
+		this.logActivity('conflict', path, `${detail} Local=${localHash.slice(0, 8)} Remote=${remoteHash.slice(0, 8)}.`);
 		return {
 			handled: true,
 			syncedContent: params.localContent,
@@ -273,7 +273,7 @@ export class ConflictResolver {
 			await this.snapshotManager.saveSnapshot(path, textDecoder.decode(params.localContent));
 			await this.cleanupPreMergeSnapshots(path);
 		}
-		this.logConflict(path, detail);
+		this.logActivity('conflict', path, detail);
 		return {
 			handled: true,
 			syncedContent: params.localContent,
@@ -293,7 +293,7 @@ export class ConflictResolver {
 			await this.snapshotManager.saveSnapshot(path, textDecoder.decode(params.remoteContent));
 			await this.cleanupPreMergeSnapshots(path);
 		}
-		this.logConflict(path, detail);
+		this.logActivity('conflict', path, detail);
 		return {
 			handled: true,
 			syncedContent: params.remoteContent,
@@ -323,16 +323,16 @@ export class ConflictResolver {
 		await this.snapshotManager.deleteSnapshot(preMergeSnapshotPath(path, 'remote'));
 	}
 
-	private logConflict(path: string, detail: string): void {
+	private logActivity(action: ActivityLogEntry['action'], path: string, detail: string): void {
 		const entry: ActivityLogEntry = {
 			id: `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
 			timestamp: Date.now(),
-			action: 'conflict',
+			action,
 			path,
 			detail,
 		};
 		this.options.logActivity?.(entry);
-		console.debug('Conflict resolved', entry);
-		new Notice(`Conflict resolved for ${path}`);
+		console.debug('Conflict handled', entry);
+		new Notice(action === 'merged' ? `Merged ${path}` : `Conflict resolved for ${path}`);
 	}
 }
