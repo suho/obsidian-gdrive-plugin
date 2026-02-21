@@ -1,17 +1,120 @@
-import { App, Modal, Notice, Platform, Setting } from 'obsidian';
+import { App, Modal, Notice, Platform, Setting, normalizePath } from 'obsidian';
 import type GDriveSyncPlugin from '../main';
+import type { DriveFileWithPath } from '../gdrive/DriveClient';
 import type { DriveFileMetadata } from '../types';
+import { computeContentHash } from '../utils/checksums';
+import { isExcluded } from '../sync/exclusions';
 
-type WizardStep = 'authenticate' | 'folder' | 'done';
+type WizardStep = 'authenticate' | 'folder' | 'initial-state' | 'conflict-review' | 'confirm' | 'done';
+type InitialConflictAction = 'keep-local' | 'keep-remote' | 'keep-both';
+
+interface LocalScanFile {
+	path: string;
+	size: number;
+	modified: number;
+	hash: string;
+}
+
+interface RemoteScanFile {
+	path: string;
+	fileId: string;
+	mimeType: string;
+	size: number;
+	modified: number;
+	hash: string;
+}
+
+interface InitialConflictItem {
+	path: string;
+	local: LocalScanFile;
+	remote: RemoteScanFile;
+	action: InitialConflictAction;
+}
+
+interface InitialSyncPlan {
+	localCount: number;
+	remoteCount: number;
+	uploads: LocalScanFile[];
+	downloads: RemoteScanFile[];
+	conflicts: InitialConflictItem[];
+}
+
+const MIME_BY_EXTENSION: Record<string, string> = {
+	md: 'text/markdown; charset=utf-8',
+	canvas: 'application/json; charset=utf-8',
+	json: 'application/json; charset=utf-8',
+	txt: 'text/plain; charset=utf-8',
+	pdf: 'application/pdf',
+	png: 'image/png',
+	jpg: 'image/jpeg',
+	jpeg: 'image/jpeg',
+	gif: 'image/gif',
+	svg: 'image/svg+xml',
+	webp: 'image/webp',
+	mp3: 'audio/mpeg',
+	wav: 'audio/wav',
+	m4a: 'audio/mp4',
+	ogg: 'audio/ogg',
+	flac: 'audio/flac',
+	mp4: 'video/mp4',
+	mov: 'video/quicktime',
+	mkv: 'video/x-matroska',
+	webm: 'video/webm',
+};
+
+function formatBytes(bytes: number): string {
+	if (bytes <= 0) {
+		return '0 B';
+	}
+	const units = ['B', 'KB', 'MB', 'GB'];
+	let value = bytes;
+	let unitIndex = 0;
+	while (value >= 1024 && unitIndex < units.length - 1) {
+		value /= 1024;
+		unitIndex += 1;
+	}
+	return `${value.toFixed(unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
+}
+
+function formatTime(ts: number): string {
+	if (!ts) {
+		return 'Unknown';
+	}
+	return new Date(ts).toLocaleString();
+}
+
+function parseRemoteModifiedTime(value: string): number {
+	const parsed = Date.parse(value);
+	return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function conflictFilePath(path: string, timestamp: number): string {
+	const normalizedPath = normalizePath(path);
+	const dotIndex = normalizedPath.lastIndexOf('.');
+	const stem = dotIndex >= 0 ? normalizedPath.slice(0, dotIndex) : normalizedPath;
+	const ext = dotIndex >= 0 ? normalizedPath.slice(dotIndex) : '';
+	const date = new Date(timestamp);
+	const yyyy = String(date.getFullYear());
+	const mm = String(date.getMonth() + 1).padStart(2, '0');
+	const dd = String(date.getDate()).padStart(2, '0');
+	const hh = String(date.getHours()).padStart(2, '0');
+	const mi = String(date.getMinutes()).padStart(2, '0');
+	const ss = String(date.getSeconds()).padStart(2, '0');
+	return normalizePath(`${stem}.sync-conflict-${yyyy}${mm}${dd}-${hh}${mi}${ss}${ext}`);
+}
+
+function defaultConflictAction(): InitialConflictAction {
+	return 'keep-local';
+}
 
 /**
  * Multi-step first-run setup wizard.
  *
- * Step 1 — Authenticate: Connect Google account via OAuth.
- * Step 2 — Folder: Create a new GDrive folder or select an existing one.
- *
- * This wizard is shown automatically when setupComplete === false.
- * It must be completed before any sync can begin.
+ * Step 1: Connect account.
+ * Step 2: Select vault folder in Google Drive.
+ * Step 3: Detect initial sync state.
+ * Step 4: Review each conflict manually.
+ * Step 5: Confirm and run first sync.
  */
 export class SetupWizard extends Modal {
 	private step: WizardStep = 'authenticate';
@@ -24,12 +127,20 @@ export class SetupWizard extends Modal {
 	private existingFoldersError = '';
 	private selectedExistingFolderId = '';
 
+	private selectedFolderId = '';
+	private selectedFolderName = '';
+
+	private initialPlan: InitialSyncPlan | null = null;
+	private planningInProgress = false;
+	private planningError = '';
+	private initialSyncInProgress = false;
+	private initialSyncProgress = '';
+
 	constructor(
 		app: App,
 		private readonly plugin: GDriveSyncPlugin
 	) {
 		super(app);
-		// Default folder name matches vault name
 		this.newFolderName = this.app.vault.getName();
 	}
 
@@ -49,17 +160,24 @@ export class SetupWizard extends Modal {
 		switch (this.step) {
 			case 'authenticate':
 				this.renderAuthStep();
-				break;
+				return;
 			case 'folder':
 				this.renderFolderStep();
-				break;
+				return;
+			case 'initial-state':
+				this.renderInitialStateStep();
+				return;
+			case 'conflict-review':
+				this.renderConflictReviewStep();
+				return;
+			case 'confirm':
+				this.renderConfirmStep();
+				return;
 			case 'done':
 				this.renderDoneStep();
-				break;
+				return;
 		}
 	}
-
-	// ── Step 1: Authenticate ──────────────────────────────────────────
 
 	private renderAuthStep(): void {
 		this.titleEl.setText(Platform.isMobile ? 'Connect account' : 'Connect to Google Drive');
@@ -73,24 +191,19 @@ export class SetupWizard extends Modal {
 		} else {
 			desc.setText(
 				'Google Drive Sync will upload your vault files to Google Drive. ' +
-				'Only files created by this plugin will be accessible — ' +
-				'files added to Google Drive through other apps will not be visible to this plugin.'
+				'Only files created by this plugin are visible because this plugin uses drive.file scope.'
 			);
 
-			const notice = this.contentEl.createEl('p');
-			notice.addClass('gdrive-sync-notice');
-			notice.setText(
-				'Your browser will open for Google sign-in. ' +
-				'After signing in, return to Obsidian to continue.'
-			);
+			const note = this.contentEl.createEl('p');
+			note.addClass('gdrive-sync-notice');
+			note.setText('Your browser will open for sign-in. Return to Obsidian after approval.');
 		}
 
-		// If already authenticated, skip straight to folder step
 		if (this.plugin.authManager.isAuthenticated) {
 			const connectedEmail = this.plugin.settings.connectedEmail;
-			const alreadyConnected = this.contentEl.createEl('p');
-			alreadyConnected.addClass('gdrive-sync-connected');
-			alreadyConnected.setText(connectedEmail ? `Connected as ${connectedEmail}` : 'Google account connected.');
+			const connected = this.contentEl.createEl('p');
+			connected.addClass('gdrive-sync-connected');
+			connected.setText(connectedEmail ? `Connected as ${connectedEmail}` : 'Google account connected.');
 
 			const accountActions = new Setting(this.contentEl)
 				.addButton(btn =>
@@ -105,10 +218,12 @@ export class SetupWizard extends Modal {
 
 			if (!Platform.isMobile) {
 				accountActions.addButton(btn =>
-					btn.setButtonText('Use a different account').onClick(async () => {
-						await this.plugin.authManager.signOut();
-						this.plugin.refreshSettingTab();
-						this.renderStep();
+					btn.setButtonText('Use a different account').onClick(() => {
+						void (async () => {
+							await this.plugin.authManager.signOut();
+							this.plugin.refreshSettingTab();
+							this.renderStep();
+						})();
 					})
 				);
 			}
@@ -157,14 +272,12 @@ export class SetupWizard extends Modal {
 		});
 	}
 
-	// ── Step 2: Folder selection ──────────────────────────────────────
-
 	private renderFolderStep(): void {
 		this.titleEl.setText('Choose a Google Drive folder');
 
 		this.contentEl.createEl('p').setText(
-			'Choose where your vault will be stored on Google Drive. ' +
-			'You can create a new folder or use an existing folder in Obsidian Vaults.'
+			'Choose where your vault should live on Google Drive. ' +
+			'You can create a folder or select one that already exists.'
 		);
 
 		new Setting(this.contentEl)
@@ -187,7 +300,7 @@ export class SetupWizard extends Modal {
 		if (this.folderMode === 'create') {
 			new Setting(this.contentEl)
 				.setName('Folder name')
-				.setDesc('Your vault will be stored in a dedicated folder on Google Drive.')
+				.setDesc('Your vault will be stored in a dedicated folder.')
 				.addText(text =>
 					text
 						.setValue(this.newFolderName)
@@ -206,7 +319,7 @@ export class SetupWizard extends Modal {
 				.setDesc('Select a folder under Obsidian vaults.')
 				.addDropdown(dropdown => {
 					if (this.existingFolders.length === 0) {
-						dropdown.addOption('', this.existingFoldersLoading ? 'Loading folders...' : 'No existing folders found');
+						dropdown.addOption('', this.existingFoldersLoading ? 'Loading folders...' : 'No folders found');
 						dropdown.setValue('');
 						dropdown.setDisabled(true);
 						return;
@@ -229,12 +342,10 @@ export class SetupWizard extends Modal {
 			new Setting(this.contentEl)
 				.setDesc('Reload folders from Google Drive.')
 				.addButton(btn =>
-					btn
-						.setButtonText('Refresh folder list')
-						.onClick(() => {
-							this.existingFoldersLoaded = false;
-							void this.reloadExistingFolders();
-						})
+					btn.setButtonText('Refresh folder list').onClick(() => {
+						this.existingFoldersLoaded = false;
+						void this.reloadExistingFolders();
+					})
 				);
 
 			if (this.existingFoldersError) {
@@ -254,13 +365,13 @@ export class SetupWizard extends Modal {
 			this.renderStep();
 		});
 
-		const createBtn = buttonRow.createEl('button');
-		createBtn.addClass('mod-cta');
-		createBtn.setText(this.folderMode === 'create' ? 'Create folder and start sync' : 'Use selected folder and start sync');
-		createBtn.addEventListener('click', () => {
+		const continueBtn = buttonRow.createEl('button');
+		continueBtn.addClass('mod-cta');
+		continueBtn.setText(this.folderMode === 'create' ? 'Continue' : 'Use selected folder');
+		continueBtn.addEventListener('click', () => {
 			void (async () => {
-				createBtn.setAttr('disabled', 'true');
-				createBtn.setText(this.folderMode === 'create' ? 'Creating folder...' : 'Using selected folder...');
+				continueBtn.setAttr('disabled', 'true');
+				continueBtn.setText(this.folderMode === 'create' ? 'Preparing folder...' : 'Preparing selection...');
 
 				try {
 					if (this.folderMode === 'create') {
@@ -268,11 +379,15 @@ export class SetupWizard extends Modal {
 					} else {
 						await this.useExistingVaultFolder();
 					}
-					this.step = 'done';
+
+					this.initialPlan = null;
+					this.planningError = '';
+					this.step = 'initial-state';
 					this.renderStep();
+					void this.prepareInitialSyncPlan();
 				} catch (err) {
-					createBtn.removeAttribute('disabled');
-					createBtn.setText(this.folderMode === 'create' ? 'Create folder and start sync' : 'Use selected folder and start sync');
+					continueBtn.removeAttribute('disabled');
+					continueBtn.setText(this.folderMode === 'create' ? 'Continue' : 'Use selected folder');
 					const errorEl = this.contentEl.querySelector('.gdrive-sync-error') ?? this.contentEl.createEl('p');
 					errorEl.addClass('gdrive-sync-error');
 					errorEl.setText(`Failed to configure folder: ${err instanceof Error ? err.message : String(err)}`);
@@ -281,12 +396,207 @@ export class SetupWizard extends Modal {
 		});
 	}
 
+	private renderInitialStateStep(): void {
+		this.titleEl.setText('Initial sync review');
+
+		if (this.planningInProgress) {
+			this.contentEl.createEl('p').setText('Scanning local and remote files. This may take a moment.');
+			return;
+		}
+
+		if (this.planningError) {
+			const errorEl = this.contentEl.createEl('p');
+			errorEl.addClass('gdrive-sync-error');
+			errorEl.setText(this.planningError);
+
+			const retryBtn = this.contentEl.createEl('button');
+			retryBtn.addClass('mod-cta');
+			retryBtn.setText('Retry scan');
+			retryBtn.addEventListener('click', () => {
+				void this.prepareInitialSyncPlan();
+			});
+			return;
+		}
+
+		if (!this.initialPlan) {
+			this.contentEl.createEl('p').setText('Preparing initial sync plan...');
+			void this.prepareInitialSyncPlan();
+			return;
+		}
+
+		const { localCount, remoteCount, uploads, downloads, conflicts } = this.initialPlan;
+		if (remoteCount === 0) {
+			this.contentEl.createEl('p').setText('Google Drive folder is empty. This vault will be uploaded.');
+		} else {
+			this.contentEl.createEl('p').setText(
+				`${remoteCount} remote files were found. Review the plan before first sync.`
+			);
+		}
+
+		const summary = this.contentEl.createEl('ul');
+		summary.createEl('li', { text: `${localCount} local files scanned` });
+		summary.createEl('li', { text: `${remoteCount} remote files scanned` });
+		summary.createEl('li', { text: `${uploads.length} files to upload` });
+		summary.createEl('li', { text: `${downloads.length} files to download` });
+		summary.createEl('li', { text: `${conflicts.length} conflicts requiring review` });
+
+		const buttonRow = this.contentEl.createEl('div', { cls: 'gdrive-sync-button-row' });
+		const backBtn = buttonRow.createEl('button');
+		backBtn.setText('Back');
+		backBtn.addEventListener('click', () => {
+			this.step = 'folder';
+			this.renderStep();
+		});
+
+		const nextBtn = buttonRow.createEl('button');
+		nextBtn.addClass('mod-cta');
+		nextBtn.setText(conflicts.length > 0 ? 'Review conflicts' : 'Continue');
+		nextBtn.addEventListener('click', () => {
+			this.step = conflicts.length > 0 ? 'conflict-review' : 'confirm';
+			this.renderStep();
+		});
+	}
+
+	private renderConflictReviewStep(): void {
+		this.titleEl.setText('Conflict review');
+		const plan = this.initialPlan;
+		if (!plan) {
+			this.step = 'initial-state';
+			this.renderStep();
+			return;
+		}
+
+		if (plan.conflicts.length === 0) {
+			this.contentEl.createEl('p').setText('No conflicts were detected.');
+		} else {
+			this.contentEl.createEl('p').setText(
+				'Review each file. First sync never auto-resolves conflicts; your choices below will be used.'
+			);
+
+			const table = this.contentEl.createEl('table', { cls: 'gdrive-sync-conflict-table' });
+			const thead = table.createTHead();
+			const headerRow = thead.insertRow();
+			headerRow.insertCell().setText('Path');
+			headerRow.insertCell().setText('Local');
+			headerRow.insertCell().setText('Remote');
+			headerRow.insertCell().setText('Action');
+
+			const tbody = table.createTBody();
+			for (const conflict of plan.conflicts) {
+				const row = tbody.insertRow();
+				row.insertCell().setText(conflict.path);
+				row.insertCell().setText(`${formatBytes(conflict.local.size)} • ${formatTime(conflict.local.modified)}`);
+				row.insertCell().setText(`${formatBytes(conflict.remote.size)} • ${formatTime(conflict.remote.modified)}`);
+				const actionCell = row.insertCell();
+
+				const select = actionCell.createEl('select');
+				select.createEl('option', { value: 'keep-local', text: 'Keep local' });
+				select.createEl('option', { value: 'keep-remote', text: 'Keep remote' });
+				select.createEl('option', { value: 'keep-both', text: 'Keep both' });
+				select.value = conflict.action;
+				select.addEventListener('change', () => {
+					conflict.action = select.value as InitialConflictAction;
+				});
+			}
+		}
+
+		const buttonRow = this.contentEl.createEl('div', { cls: 'gdrive-sync-button-row' });
+		const backBtn = buttonRow.createEl('button');
+		backBtn.setText('Back');
+		backBtn.addEventListener('click', () => {
+			this.step = 'initial-state';
+			this.renderStep();
+		});
+
+		const nextBtn = buttonRow.createEl('button');
+		nextBtn.addClass('mod-cta');
+		nextBtn.setText('Continue');
+		nextBtn.addEventListener('click', () => {
+			this.step = 'confirm';
+			this.renderStep();
+		});
+	}
+
+	private renderConfirmStep(): void {
+		this.titleEl.setText('Confirm initial sync');
+		const plan = this.initialPlan;
+		if (!plan) {
+			this.step = 'initial-state';
+			this.renderStep();
+			return;
+		}
+
+		const keepLocalCount = plan.conflicts.filter(conflict => conflict.action === 'keep-local').length;
+		const keepRemoteCount = plan.conflicts.filter(conflict => conflict.action === 'keep-remote').length;
+		const keepBothCount = plan.conflicts.filter(conflict => conflict.action === 'keep-both').length;
+		const uploadCount = plan.uploads.length + keepLocalCount + keepBothCount;
+		const downloadCount = plan.downloads.length + keepRemoteCount + keepBothCount;
+
+		this.contentEl.createEl('p').setText(
+			`${uploadCount} files will be uploaded, ${downloadCount} files will be downloaded, and ${plan.conflicts.length} conflicts will be resolved.`
+		);
+
+		if (keepBothCount > 0) {
+			this.contentEl.createEl('p').setText(
+				`${keepBothCount} conflict files will be created with .sync-conflict timestamps so both versions are preserved.`
+			);
+		}
+
+		if (this.initialSyncInProgress) {
+			const progress = this.contentEl.createEl('p');
+			progress.addClass('gdrive-sync-notice');
+			progress.setText(this.initialSyncProgress || 'Running initial sync...');
+		}
+
+		const buttonRow = this.contentEl.createEl('div', { cls: 'gdrive-sync-button-row' });
+		const backBtn = buttonRow.createEl('button');
+		backBtn.setText('Back');
+		backBtn.toggleClass('is-disabled', this.initialSyncInProgress);
+		backBtn.addEventListener('click', () => {
+			if (this.initialSyncInProgress) {
+				return;
+			}
+			this.step = plan.conflicts.length > 0 ? 'conflict-review' : 'initial-state';
+			this.renderStep();
+		});
+
+		const confirmBtn = buttonRow.createEl('button');
+		confirmBtn.addClass('mod-cta');
+		confirmBtn.setText(this.initialSyncInProgress ? 'Syncing...' : 'Confirm and run initial sync');
+		if (this.initialSyncInProgress) {
+			confirmBtn.setAttr('disabled', 'true');
+		}
+		confirmBtn.addEventListener('click', () => {
+			if (this.initialSyncInProgress) {
+				return;
+			}
+			void this.executeInitialSyncPlan();
+		});
+	}
+
+	private renderDoneStep(): void {
+		this.titleEl.setText('Setup complete');
+		this.contentEl.createEl('p').setText(
+			`Initial sync is complete. Your vault is now connected to "${this.selectedFolderName || this.newFolderName}" on Google Drive.`
+		);
+		this.contentEl.createEl('p').setText(
+			'Sync runs while Obsidian is in the foreground. On mobile, sync pauses in the background and resumes when you return.'
+		);
+
+		const doneBtn = this.contentEl.createEl('button');
+		doneBtn.addClass('mod-cta');
+		doneBtn.setText('Start syncing');
+		doneBtn.addEventListener('click', () => {
+			this.close();
+			void this.plugin.triggerInitialSync();
+		});
+	}
+
 	private async createVaultFolder(): Promise<void> {
 		const client = this.plugin.driveClient;
 		const folderName = this.newFolderName || this.app.vault.getName();
 		const rootFolderId = await this.ensureRootFolderId();
 
-		// Create (or reuse) the vault-specific folder
 		let vaultFolderId = await client.findFolder(folderName, rootFolderId);
 		if (!vaultFolderId) {
 			vaultFolderId = await client.createFolder(folderName, rootFolderId);
@@ -304,14 +614,367 @@ export class SetupWizard extends Modal {
 	}
 
 	private async persistSelectedFolder(folderId: string, folderName: string): Promise<void> {
+		this.selectedFolderId = folderId;
+		this.selectedFolderName = folderName;
 		this.newFolderName = folderName;
+
 		this.plugin.settings.gDriveFolderId = folderId;
 		this.plugin.settings.gDriveFolderName = folderName;
-		this.plugin.settings.setupComplete = true;
+		this.plugin.settings.setupComplete = false;
 		this.plugin.settings.lastSyncPageToken = '';
 		await this.resetSyncDatabase();
 		await this.plugin.saveSettings();
 		this.plugin.refreshSettingTab();
+	}
+
+	private async prepareInitialSyncPlan(): Promise<void> {
+		if (this.planningInProgress) {
+			return;
+		}
+		if (!this.selectedFolderId && !this.plugin.settings.gDriveFolderId) {
+			this.planningError = 'No target folder selected.';
+			this.renderStep();
+			return;
+		}
+
+		this.planningInProgress = true;
+		this.planningError = '';
+		this.initialPlan = null;
+		this.renderStep();
+
+		try {
+			const localFiles = await this.scanLocalFiles();
+			const sharedPaths = new Set<string>();
+			const remoteWithPaths = await this.plugin.driveClient.listAllFilesRecursiveWithPaths(
+				this.selectedFolderId || this.plugin.settings.gDriveFolderId
+			);
+			for (const item of remoteWithPaths) {
+				const normalizedPath = normalizePath(item.path);
+				if (localFiles.has(normalizedPath)) {
+					sharedPaths.add(normalizedPath);
+				}
+			}
+
+			const remoteFiles = await this.scanRemoteFiles(remoteWithPaths, sharedPaths);
+			const uploads: LocalScanFile[] = [];
+			const downloads: RemoteScanFile[] = [];
+			const conflicts: InitialConflictItem[] = [];
+
+			for (const [path, localFile] of localFiles.entries()) {
+				const remoteFile = remoteFiles.get(path);
+				if (!remoteFile) {
+					uploads.push(localFile);
+					continue;
+				}
+				if (remoteFile.hash && remoteFile.hash === localFile.hash) {
+					continue;
+				}
+
+				conflicts.push({
+					path,
+					local: localFile,
+					remote: remoteFile,
+					action: defaultConflictAction(),
+				});
+			}
+
+			for (const [path, remoteFile] of remoteFiles.entries()) {
+				if (!localFiles.has(path)) {
+					downloads.push(remoteFile);
+				}
+			}
+
+			this.initialPlan = {
+				localCount: localFiles.size,
+				remoteCount: remoteFiles.size,
+				uploads: uploads.sort((a, b) => a.path.localeCompare(b.path)),
+				downloads: downloads.sort((a, b) => a.path.localeCompare(b.path)),
+				conflicts: conflicts.sort((a, b) => a.path.localeCompare(b.path)),
+			};
+		} catch (err) {
+			this.planningError = `Failed to prepare initial sync plan: ${err instanceof Error ? err.message : String(err)}`;
+		} finally {
+			this.planningInProgress = false;
+			this.renderStep();
+		}
+	}
+
+	private async executeInitialSyncPlan(): Promise<void> {
+		const plan = this.initialPlan;
+		if (!plan) {
+			return;
+		}
+
+		this.initialSyncInProgress = true;
+		this.initialSyncProgress = 'Starting initial sync...';
+		this.renderStep();
+
+		try {
+			const folderId = this.selectedFolderId || this.plugin.settings.gDriveFolderId;
+			if (!folderId) {
+				throw new Error('No Google Drive folder selected.');
+			}
+
+			const syncDb = this.plugin.syncManager.syncDb;
+			syncDb.reset();
+
+			this.initialSyncProgress = `Downloading ${plan.downloads.length} remote files...`;
+			this.renderStep();
+			for (const remoteFile of plan.downloads) {
+				await this.applyRemoteFile(remoteFile.path, remoteFile);
+			}
+
+			this.initialSyncProgress = `Resolving ${plan.conflicts.length} conflicts...`;
+			this.renderStep();
+			for (const conflict of plan.conflicts) {
+				if (conflict.action === 'keep-remote') {
+					await this.applyRemoteFile(conflict.path, conflict.remote);
+					continue;
+				}
+
+				if (conflict.action === 'keep-both') {
+					const remoteContent = await this.plugin.driveClient.downloadFile(conflict.remote.fileId);
+					const keepPath = conflictFilePath(conflict.path, Date.now());
+					await this.ensureParentDirectories(keepPath);
+					await this.plugin.app.vault.adapter.writeBinary(keepPath, remoteContent);
+					await this.uploadLocalFile(keepPath, folderId);
+				}
+
+				await this.applyLocalFile(conflict.path, folderId, conflict.remote.fileId, conflict.remote.mimeType);
+			}
+
+			this.initialSyncProgress = `Uploading ${plan.uploads.length} local files...`;
+			this.renderStep();
+			for (const localFile of plan.uploads) {
+				await this.uploadLocalFile(localFile.path, folderId);
+			}
+
+			await syncDb.save();
+
+			this.initialSyncProgress = 'Finalizing setup...';
+			this.renderStep();
+			this.plugin.settings.setupComplete = true;
+			try {
+				this.plugin.settings.lastSyncPageToken = await this.plugin.driveClient.getStartPageToken();
+			} catch {
+				this.plugin.settings.lastSyncPageToken = '';
+			}
+			await this.plugin.saveSettings();
+			this.plugin.refreshSettingTab();
+
+			this.step = 'done';
+		} catch (err) {
+			new Notice(`Initial sync failed: ${err instanceof Error ? err.message : String(err)}`, 12000);
+		} finally {
+			this.initialSyncInProgress = false;
+			this.initialSyncProgress = '';
+			this.renderStep();
+		}
+	}
+
+	private async applyRemoteFile(path: string, remoteFile: RemoteScanFile): Promise<void> {
+		const content = await this.plugin.driveClient.downloadFile(remoteFile.fileId);
+		await this.ensureParentDirectories(path);
+		await this.plugin.app.vault.adapter.writeBinary(path, content);
+
+		const hash = await computeContentHash(content);
+		this.plugin.syncManager.syncDb.setRecord(path, {
+			gDriveFileId: remoteFile.fileId,
+			localPath: path,
+			localHash: hash,
+			remoteHash: hash,
+			lastSyncedTimestamp: Date.now(),
+			status: 'synced',
+		});
+		await this.saveMarkdownSnapshot(path, content);
+	}
+
+	private async applyLocalFile(path: string, folderId: string, existingRemoteId: string, mimeType: string): Promise<void> {
+		if (!await this.plugin.app.vault.adapter.exists(path)) {
+			throw new Error(`File not found: ${path}`);
+		}
+
+		const content = await this.plugin.app.vault.adapter.readBinary(path);
+		const hash = await computeContentHash(content);
+		await this.plugin.driveClient.updateFile(
+			existingRemoteId,
+			content,
+			mimeType || this.getMimeType(path),
+			this.plugin.settings.keepRevisionsForever && path.toLowerCase().endsWith('.md')
+		);
+
+		this.plugin.syncManager.syncDb.setRecord(path, {
+			gDriveFileId: existingRemoteId,
+			localPath: path,
+			localHash: hash,
+			remoteHash: hash,
+			lastSyncedTimestamp: Date.now(),
+			status: 'synced',
+		});
+		await this.saveMarkdownSnapshot(path, content);
+	}
+
+	private async uploadLocalFile(path: string, folderId: string): Promise<void> {
+		if (!await this.plugin.app.vault.adapter.exists(path)) {
+			return;
+		}
+		const content = await this.plugin.app.vault.adapter.readBinary(path);
+		const hash = await computeContentHash(content);
+		const { parentId, fileName } = await this.resolveRemoteParent(path, folderId);
+		const metadata = await this.plugin.driveClient.createFile(
+			fileName,
+			content,
+			this.getMimeType(path),
+			parentId,
+			this.plugin.settings.keepRevisionsForever && path.toLowerCase().endsWith('.md')
+		);
+
+		this.plugin.syncManager.syncDb.setRecord(path, {
+			gDriveFileId: metadata.id,
+			localPath: path,
+			localHash: hash,
+			remoteHash: hash,
+			lastSyncedTimestamp: Date.now(),
+			status: 'synced',
+		});
+		await this.saveMarkdownSnapshot(path, content);
+	}
+
+	private async scanLocalFiles(): Promise<Map<string, LocalScanFile>> {
+		const localFiles = new Map<string, LocalScanFile>();
+		const paths = await this.collectAllLocalPaths();
+		for (const path of paths) {
+			if (this.isPathExcluded(path)) {
+				continue;
+			}
+
+			const content = await this.plugin.app.vault.adapter.readBinary(path);
+			const hash = await computeContentHash(content);
+			const stat = await this.plugin.app.vault.adapter.stat(path);
+			localFiles.set(path, {
+				path,
+				size: stat?.size ?? content.byteLength,
+				modified: stat?.mtime ?? Date.now(),
+				hash,
+			});
+		}
+		return localFiles;
+	}
+
+	private async scanRemoteFiles(
+		remoteWithPaths: DriveFileWithPath[],
+		sharedPaths: Set<string>
+	): Promise<Map<string, RemoteScanFile>> {
+		const remoteFiles = new Map<string, RemoteScanFile>();
+
+		for (const item of remoteWithPaths) {
+			const path = normalizePath(item.path);
+			if (this.isPathExcluded(path)) {
+				continue;
+			}
+
+			let hash = '';
+			if (sharedPaths.has(path)) {
+				const content = await this.plugin.driveClient.downloadFile(item.file.id);
+				hash = await computeContentHash(content);
+			}
+
+			remoteFiles.set(path, {
+				path,
+				fileId: item.file.id,
+				mimeType: item.file.mimeType,
+				size: Number(item.file.size ?? 0),
+				modified: parseRemoteModifiedTime(item.file.modifiedTime),
+				hash,
+			});
+		}
+
+		return remoteFiles;
+	}
+
+	private async collectAllLocalPaths(): Promise<string[]> {
+		const discoveredFiles = new Set<string>();
+		const pendingDirs: string[] = [''];
+		const visitedDirs = new Set<string>();
+
+		while (pendingDirs.length > 0) {
+			const dir = pendingDirs.pop() ?? '';
+			const normalizedDir = normalizePath(dir);
+			if (visitedDirs.has(normalizedDir)) {
+				continue;
+			}
+			visitedDirs.add(normalizedDir);
+
+			const listed = await this.plugin.app.vault.adapter.list(dir);
+			for (const file of listed.files) {
+				discoveredFiles.add(normalizePath(file));
+			}
+
+			for (const folder of listed.folders) {
+				const normalizedFolder = normalizePath(folder);
+				if (visitedDirs.has(normalizedFolder)) {
+					continue;
+				}
+				pendingDirs.push(normalizedFolder);
+			}
+		}
+
+		return [...discoveredFiles].sort((a, b) => a.localeCompare(b));
+	}
+
+	private async resolveRemoteParent(path: string, rootFolderId: string): Promise<{ parentId: string; fileName: string }> {
+		const segments = normalizePath(path).split('/');
+		const fileName = segments.pop() ?? path;
+		const parentSegments = segments.filter(Boolean);
+
+		let parentId = rootFolderId;
+		if (parentSegments.length > 0) {
+			parentId = await this.plugin.driveClient.ensureFolderPath(parentSegments, rootFolderId);
+		}
+
+		return { parentId, fileName };
+	}
+
+	private getMimeType(path: string): string {
+		const fileName = normalizePath(path).split('/').pop() ?? path;
+		const dot = fileName.lastIndexOf('.');
+		if (dot < 0) {
+			return 'application/octet-stream';
+		}
+		const ext = fileName.slice(dot + 1).toLowerCase();
+		return MIME_BY_EXTENSION[ext] ?? 'application/octet-stream';
+	}
+
+	private async ensureParentDirectories(path: string): Promise<void> {
+		const parts = normalizePath(path).split('/');
+		parts.pop();
+		if (parts.length === 0) {
+			return;
+		}
+
+		let current = '';
+		for (const part of parts) {
+			current = current ? `${current}/${part}` : part;
+			if (!await this.plugin.app.vault.adapter.exists(current)) {
+				await this.plugin.app.vault.adapter.mkdir(current);
+			}
+		}
+	}
+
+	private async saveMarkdownSnapshot(path: string, content: ArrayBuffer): Promise<void> {
+		if (!path.toLowerCase().endsWith('.md')) {
+			return;
+		}
+		await this.plugin.syncManager.snapshotManager.saveSnapshot(path, new TextDecoder().decode(content));
+	}
+
+	private isPathExcluded(path: string): boolean {
+		return isExcluded(
+			path,
+			this.plugin.settings.excludedPaths,
+			this.plugin.settings,
+			this.plugin.app.vault.configDir
+		);
 	}
 
 	private async resetSyncDatabase(): Promise<void> {
@@ -353,30 +1016,5 @@ export class SetupWizard extends Modal {
 			this.existingFoldersLoading = false;
 			this.renderStep();
 		}
-	}
-
-	// ── Step 3: Done ──────────────────────────────────────────────────
-
-	private renderDoneStep(): void {
-		this.titleEl.setText('Setup complete');
-
-		this.contentEl.createEl('p').setText(
-			`Your vault is ready to sync to "${this.newFolderName}" on Google Drive. ` +
-			'Files will be uploaded automatically as you work.'
-		);
-
-		this.contentEl.createEl('p').setText(
-			'Note: Sync runs only while Obsidian is open. ' +
-			'On mobile, sync pauses when the app is backgrounded and resumes when you return.'
-		);
-
-		const doneBtn = this.contentEl.createEl('button');
-		doneBtn.addClass('mod-cta');
-		doneBtn.setText('Start syncing');
-		doneBtn.addEventListener('click', () => {
-			this.close();
-			// Trigger an initial sync
-			void this.plugin.triggerInitialSync();
-		});
 	}
 }

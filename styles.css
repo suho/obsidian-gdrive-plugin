@@ -41,3 +41,70 @@ If your plugin does not need CSS, delete this file.
 	gap: 12px;
 	margin-top: 12px;
 }
+
+.gdrive-sync-conflict-meta {
+	color: var(--text-muted);
+	margin-top: 4px;
+	margin-bottom: 12px;
+}
+
+.gdrive-sync-conflict-split {
+	display: grid;
+	grid-template-columns: 1fr 1fr;
+	gap: 12px;
+}
+
+.gdrive-sync-conflict-pane {
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 8px;
+	padding: 8px;
+	background-color: var(--background-secondary);
+	min-height: 220px;
+}
+
+.gdrive-sync-conflict-pane h4 {
+	margin: 0 0 8px;
+	font-size: 0.9rem;
+}
+
+.gdrive-sync-conflict-pre {
+	margin: 0;
+	white-space: pre-wrap;
+	word-break: break-word;
+	max-height: 320px;
+	overflow: auto;
+	font-size: 0.82rem;
+	line-height: 1.35;
+}
+
+.gdrive-sync-conflict-local-change {
+	background-color: rgba(220, 80, 80, 0.2);
+}
+
+.gdrive-sync-conflict-remote-change {
+	background-color: rgba(80, 170, 110, 0.22);
+}
+
+.gdrive-sync-conflict-table {
+	width: 100%;
+	border-collapse: collapse;
+	margin-top: 8px;
+}
+
+.gdrive-sync-conflict-table td,
+.gdrive-sync-conflict-table th {
+	border: 1px solid var(--background-modifier-border);
+	padding: 6px 8px;
+	text-align: left;
+	vertical-align: top;
+}
+
+.gdrive-sync-conflict-table select {
+	width: 100%;
+}
+
+@media (max-width: 900px) {
+	.gdrive-sync-conflict-split {
+		grid-template-columns: 1fr;
+	}
+}

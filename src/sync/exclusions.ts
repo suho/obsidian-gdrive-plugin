@@ -79,6 +79,7 @@ export function isHardExcluded(path: string, configDir: string): boolean {
 	if (lower === `${configDirLower}/cache` || lower.startsWith(`${configDirLower}/cache/`)) return true;
 	if (lower === `${configDirLower}/workspace.json`) return true;
 	if (lower === `${configDirLower}/workspace-mobile.json`) return true;
+	if (lower.includes('/plugins/') && lower.includes('/snapshots/')) return true;
 	if (lower.startsWith(`${configDirLower}/plugins/`) && lower.endsWith('/main.js')) return true;
 
 	const segments = normalized.split('/');

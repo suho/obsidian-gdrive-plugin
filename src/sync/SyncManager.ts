@@ -2,12 +2,14 @@ import { Notice, TFile, normalizePath } from 'obsidian';
 import type { DriveChange, DriveClient } from '../gdrive/DriveClient';
 import { ChangeTracker } from '../gdrive/ChangeTracker';
 import type GDriveSyncPlugin from '../main';
-import type { SyncQueueEntry } from '../types';
+import type { ActivityLogEntry, SyncQueueEntry } from '../types';
 import { debounceTrailing, type DebouncedFn } from '../utils/debounce';
 import { isOnline } from '../utils/network';
 import { SyncStatusBar } from '../ui/SyncStatusBar';
+import { ConflictResolver } from './ConflictResolver';
 import { DownloadManager } from './DownloadManager';
 import { isExcluded } from './exclusions';
+import { SnapshotManager } from './SnapshotManager';
 import { SyncDatabase } from './SyncDatabase';
 import { UploadManager } from './UploadManager';
 
@@ -103,11 +105,14 @@ export class SyncManager {
 
 	private readonly dataDir: string;
 	private readonly offlineQueuePath: string;
+	private readonly activityLog: ActivityLogEntry[] = [];
 
 	readonly syncDb: SyncDatabase;
+	readonly snapshotManager: SnapshotManager;
 	readonly uploadManager: UploadManager;
 	readonly downloadManager: DownloadManager;
 	readonly changeTracker: ChangeTracker;
+	readonly conflictResolver: ConflictResolver;
 
 	constructor(
 		private readonly plugin: GDriveSyncPlugin,
@@ -115,8 +120,20 @@ export class SyncManager {
 		private readonly statusBar: SyncStatusBar
 	) {
 		this.syncDb = new SyncDatabase(plugin);
-		this.uploadManager = new UploadManager(plugin, driveClient, this.syncDb);
-		this.downloadManager = new DownloadManager(plugin, driveClient, this.syncDb);
+		this.snapshotManager = new SnapshotManager(plugin);
+		this.uploadManager = new UploadManager(plugin, driveClient, this.syncDb, this.snapshotManager);
+		this.conflictResolver = new ConflictResolver(plugin, driveClient, this.snapshotManager, {
+			logActivity: entry => {
+				this.appendActivityEntry(entry);
+			},
+		});
+		this.downloadManager = new DownloadManager(
+			plugin,
+			driveClient,
+			this.syncDb,
+			this.snapshotManager,
+			this.conflictResolver
+		);
 		this.changeTracker = new ChangeTracker(plugin, driveClient, this.syncDb);
 		this.dataDir = normalizePath(`${this.plugin.app.vault.configDir}/plugins/${this.plugin.manifest.id}`);
 		this.offlineQueuePath = normalizePath(`${this.dataDir}/offline-queue.json`);
@@ -125,6 +142,7 @@ export class SyncManager {
 	async initialize(): Promise<void> {
 		await this.syncDb.load();
 		await this.loadOfflineQueue();
+		await this.snapshotManager.pruneSnapshots(this.collectPendingSnapshotPaths());
 		this.downloadManager.registerHandlers();
 		this.registerFileWatchers();
 		this.registerPeriodicPull();
@@ -201,6 +219,7 @@ export class SyncManager {
 			if (pullSummary.processed > 0 || totalQueuedChanges > 0 || fullPushResult.changedDb) {
 				await this.syncDb.save();
 			}
+			await this.snapshotManager.pruneSnapshots(this.collectPendingSnapshotPaths());
 
 			this.statusBar.setSynced();
 			return {
@@ -782,5 +801,41 @@ export class SyncManager {
 		if (!await this.plugin.app.vault.adapter.exists(this.dataDir)) {
 			await this.plugin.app.vault.adapter.mkdir(this.dataDir);
 		}
+	}
+
+	getRecentActivityEntries(limit = 200): ActivityLogEntry[] {
+		if (limit <= 0) {
+			return [];
+		}
+		return this.activityLog.slice(Math.max(0, this.activityLog.length - limit));
+	}
+
+	private appendActivityEntry(entry: ActivityLogEntry): void {
+		this.activityLog.push(entry);
+		if (this.activityLog.length > 1000) {
+			this.activityLog.splice(0, this.activityLog.length - 1000);
+		}
+	}
+
+	private collectPendingSnapshotPaths(): Set<string> {
+		const pending = new Set<string>();
+		for (const entry of this.pendingPushQueue) {
+			pending.add(entry.path);
+			if (entry.oldPath) {
+				pending.add(entry.oldPath);
+			}
+		}
+		for (const entry of this.offlineQueue) {
+			pending.add(entry.path);
+			if (entry.oldPath) {
+				pending.add(entry.oldPath);
+			}
+		}
+		for (const record of this.syncDb.getAllRecords()) {
+			if (record.status !== 'synced') {
+				pending.add(record.localPath);
+			}
+		}
+		return pending;
 	}
 }

@@ -319,6 +319,32 @@ export class DriveClient {
 		return fileResults;
 	}
 
+	async listAllFilesRecursiveWithPaths(rootFolderId: string): Promise<DriveFileWithPath[]> {
+		const fileResults: DriveFileWithPath[] = [];
+		const folderQueue: Array<{ folderId: string; relativePath: string }> = [{ folderId: rootFolderId, relativePath: '' }];
+		const visitedFolders = new Set<string>();
+
+		while (folderQueue.length > 0) {
+			const current = folderQueue.shift();
+			if (!current || visitedFolders.has(current.folderId)) {
+				continue;
+			}
+			visitedFolders.add(current.folderId);
+
+			const children = await this.listAllFiles(current.folderId);
+			for (const child of children) {
+				const childPath = current.relativePath ? `${current.relativePath}/${child.name}` : child.name;
+				if (child.mimeType === 'application/vnd.google-apps.folder') {
+					folderQueue.push({ folderId: child.id, relativePath: childPath });
+					continue;
+				}
+				fileResults.push({ file: child, path: childPath });
+			}
+		}
+
+		return fileResults;
+	}
+
 	/** Backward-compatible alias used by the Phase 1 API checklist. */
 	async listFiles(folderId: string, pageToken?: string, pageSize = 1000): Promise<DriveFileMetadata[]> {
 		const q = `'${folderId}' in parents and trashed=false`;
@@ -632,4 +658,9 @@ export interface DriveChange {
 	fileId: string;
 	removed: boolean;
 	file?: DriveFileMetadata;
+}
+
+export interface DriveFileWithPath {
+	file: DriveFileMetadata;
+	path: string;
 }

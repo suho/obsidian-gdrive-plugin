@@ -4,6 +4,7 @@ import type { DriveClient } from '../gdrive/DriveClient';
 import type { SyncRecord } from '../types';
 import { computeContentHash } from '../utils/checksums';
 import { isExcluded } from './exclusions';
+import type { SnapshotManager } from './SnapshotManager';
 import type { SyncDatabase } from './SyncDatabase';
 
 const MIME_BY_EXTENSION: Record<string, string> = {
@@ -46,7 +47,8 @@ export class UploadManager {
 	constructor(
 		private readonly plugin: GDriveSyncPlugin,
 		private readonly driveClient: DriveClient,
-		private readonly syncDb: SyncDatabase
+		private readonly syncDb: SyncDatabase,
+		private readonly snapshotManager: SnapshotManager
 	) {}
 
 	async syncLocalVault(): Promise<{ summary: UploadSummary; changedDb: boolean }> {
@@ -224,10 +226,11 @@ export class UploadManager {
 			gDriveFileId: metadata.id,
 			localPath: path,
 			localHash,
-			remoteHash: metadata.md5Checksum ?? localHash,
+			remoteHash: localHash,
 			lastSyncedTimestamp: Date.now(),
 			status: 'synced',
 		});
+		await this.saveMarkdownSnapshot(path, content);
 	}
 
 	private async pushExistingFile(path: string, localHash: string): Promise<void> {
@@ -238,7 +241,7 @@ export class UploadManager {
 		}
 
 		const content = await this.plugin.app.vault.adapter.readBinary(path);
-		const metadata = await this.driveClient.updateFile(
+		await this.driveClient.updateFile(
 			record.gDriveFileId,
 			content,
 			this.getMimeType(path),
@@ -248,10 +251,11 @@ export class UploadManager {
 		this.syncDb.setRecord(path, {
 			...record,
 			localHash,
-			remoteHash: metadata.md5Checksum ?? localHash,
+			remoteHash: localHash,
 			lastSyncedTimestamp: Date.now(),
 			status: 'synced',
 		});
+		await this.saveMarkdownSnapshot(path, content);
 	}
 
 	private async applyRename(oldPath: string, newPath: string, localHash: string): Promise<void> {
@@ -278,9 +282,11 @@ export class UploadManager {
 			...record,
 			localPath: newPath,
 			localHash,
+			remoteHash: localHash,
 			lastSyncedTimestamp: Date.now(),
 			status: 'synced',
 		});
+		await this.snapshotManager.renameSnapshot(oldPath, newPath);
 	}
 
 	private async applyDelete(path: string): Promise<boolean> {
@@ -289,6 +295,7 @@ export class UploadManager {
 
 		await this.driveClient.trashFile(record.gDriveFileId);
 		this.syncDb.deleteRecord(path);
+		await this.snapshotManager.deleteSnapshot(path);
 		return true;
 	}
 
@@ -333,5 +340,12 @@ export class UploadManager {
 			this.plugin.settings,
 			this.plugin.app.vault.configDir
 		);
+	}
+
+	private async saveMarkdownSnapshot(path: string, content: ArrayBuffer): Promise<void> {
+		if (!path.toLowerCase().endsWith('.md')) {
+			return;
+		}
+		await this.snapshotManager.saveSnapshot(path, new TextDecoder().decode(content));
 	}
 }

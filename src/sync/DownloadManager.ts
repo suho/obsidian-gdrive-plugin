@@ -3,6 +3,8 @@ import type GDriveSyncPlugin from '../main';
 import type { DriveClient, DriveChange } from '../gdrive/DriveClient';
 import type { DriveFileMetadata } from '../types';
 import { computeContentHash } from '../utils/checksums';
+import type { ConflictResolver } from './ConflictResolver';
+import type { SnapshotManager } from './SnapshotManager';
 import type { SyncDatabase } from './SyncDatabase';
 import { isExcluded } from './exclusions';
 
@@ -25,7 +27,9 @@ export class DownloadManager {
 	constructor(
 		private readonly plugin: GDriveSyncPlugin,
 		private readonly driveClient: DriveClient,
-		private readonly syncDb: SyncDatabase
+		private readonly syncDb: SyncDatabase,
+		private readonly snapshotManager: SnapshotManager,
+		private readonly conflictResolver: ConflictResolver
 	) {
 		this.trashDir = normalizePath(`${this.plugin.app.vault.configDir}/plugins/${this.plugin.manifest.id}/trash`);
 		if (this.plugin.settings.gDriveFolderId) {
@@ -111,15 +115,45 @@ export class DownloadManager {
 		}
 
 		const content = await this.driveClient.downloadFile(change.fileId);
+
+		if (existing && await this.plugin.app.vault.adapter.exists(localPath)) {
+			const localContent = await this.plugin.app.vault.adapter.readBinary(localPath);
+			const localHash = await computeContentHash(localContent);
+			const remoteHash = await computeContentHash(content);
+			const hasConflict = this.conflictResolver.isConflict(localHash, remoteHash, existing.localHash);
+			if (hasConflict) {
+				const stat = await this.plugin.app.vault.adapter.stat(localPath);
+				const localModified = stat?.mtime ?? Date.now();
+				const resolved = await this.conflictResolver.resolveConflict({
+					path: localPath,
+					record: existing,
+					remoteFile,
+					localContent,
+					remoteContent: content,
+					localModified,
+				});
+				this.syncDb.setRecord(localPath, {
+					gDriveFileId: change.fileId,
+					localPath,
+					localHash: resolved.syncedHash,
+					remoteHash: resolved.syncedHash,
+					lastSyncedTimestamp: Date.now(),
+					status: 'synced',
+				});
+				return 'pulled';
+			}
+		}
+
 		await this.ensureParentDirectories(localPath);
 		await this.plugin.app.vault.adapter.writeBinary(localPath, content);
+		await this.saveMarkdownSnapshot(localPath, content);
 
 		const localHash = await computeContentHash(content);
 		this.syncDb.setRecord(localPath, {
 			gDriveFileId: change.fileId,
 			localPath,
 			localHash,
-			remoteHash: remoteFile.md5Checksum ?? localHash,
+			remoteHash: localHash,
 			lastSyncedTimestamp: Date.now(),
 			status: 'synced',
 		});
@@ -175,6 +209,7 @@ export class DownloadManager {
 		}
 
 		this.syncDb.deleteRecord(record.localPath);
+		await this.snapshotManager.deleteSnapshot(record.localPath);
 		return 'deleted';
 	}
 
@@ -258,11 +293,13 @@ export class DownloadManager {
 		const existing = this.plugin.app.vault.getAbstractFileByPath(oldPath);
 		if (existing instanceof TFile) {
 			await this.plugin.app.vault.rename(existing, newPath);
+			await this.snapshotManager.renameSnapshot(oldPath, newPath);
 			return;
 		}
 
 		if (await this.plugin.app.vault.adapter.exists(oldPath)) {
 			await this.plugin.app.vault.adapter.rename(oldPath, newPath);
+			await this.snapshotManager.renameSnapshot(oldPath, newPath);
 		}
 	}
 
@@ -291,5 +328,12 @@ export class DownloadManager {
 			this.plugin.settings,
 			this.plugin.app.vault.configDir
 		);
+	}
+
+	private async saveMarkdownSnapshot(path: string, content: ArrayBuffer): Promise<void> {
+		if (!path.toLowerCase().endsWith('.md')) {
+			return;
+		}
+		await this.snapshotManager.saveSnapshot(path, new TextDecoder().decode(content));
 	}
 }

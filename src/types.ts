@@ -79,11 +79,19 @@ export interface DriveRevision {
 	keepForever?: boolean;
 }
 
+export interface MergeConflictRegion {
+	startLine: number;
+	endLine: number;
+	localText: string;
+	remoteText: string;
+}
+
 // Result of a three-way merge
 export interface MergeResult {
 	merged: string;
 	hasConflicts: boolean;
 	conflictCount: number;
+	conflictRegions: MergeConflictRegion[];
 }
 
 // Sync engine state snapshot

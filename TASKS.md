@@ -171,50 +171,50 @@
 ## Phase 4 — Merge & Conflict Resolution
 
 ### 4.1 Snapshot Manager
-- [ ] Create `src/sync/SnapshotManager.ts`
-- [ ] Implement `saveSnapshot(path, content)` — gzip + write to `snapshots/` directory
-- [ ] Implement `loadSnapshot(path)` → returns base version content (or null if no snapshot)
-- [ ] Implement `deleteSnapshot(path)` — cleanup after conflict resolved
-- [ ] Implement pruning: remove snapshots older than 30 days with no pending changes
-- [ ] Only snapshot `.md` files (binary files use last-modified-wins)
-- [ ] Exclude `snapshots/` directory from sync
+- [x] Create `src/sync/SnapshotManager.ts`
+- [x] Implement `saveSnapshot(path, content)` — gzip + write to `snapshots/` directory
+- [x] Implement `loadSnapshot(path)` → returns base version content (or null if no snapshot)
+- [x] Implement `deleteSnapshot(path)` — cleanup after conflict resolved
+- [x] Implement pruning: remove snapshots older than 30 days with no pending changes
+- [x] Only snapshot `.md` files (binary files use last-modified-wins)
+- [x] Exclude `snapshots/` directory from sync
 
 ### 4.2 Merge Engine
-- [ ] Create `src/sync/MergeEngine.ts`
-- [ ] Import and wrap `diff-match-patch` library
-- [ ] Implement `threeWayMerge(base, local, remote)` → returns `{ merged: string, hasConflicts: boolean, conflictRegions: Region[] }`
-- [ ] Handle clean merge (no overlapping patches) → return merged text
-- [ ] Handle conflicting merge → insert `<<<<<<<` / `=======` / `>>>>>>>` markers
-- [ ] Implement JSON deep merge for `.obsidian/` config files (local keys overlaid on remote)
+- [x] Create `src/sync/MergeEngine.ts`
+- [x] Import and wrap `diff-match-patch` library
+- [x] Implement `threeWayMerge(base, local, remote)` → returns `{ merged: string, hasConflicts: boolean, conflictRegions: Region[] }`
+- [x] Handle clean merge (no overlapping patches) → return merged text
+- [x] Handle conflicting merge → insert `<<<<<<<` / `=======` / `>>>>>>>` markers
+- [x] Implement JSON deep merge for `.obsidian/` config files (local keys overlaid on remote)
 
 ### 4.3 Conflict Resolver
-- [ ] Create `src/sync/ConflictResolver.ts`
-- [ ] Implement conflict detection: `localHash ≠ lastSyncedHash AND remoteHash ≠ lastSyncedHash`
-- [ ] Dispatch to correct strategy based on file type and settings:
-  - [ ] Markdown + auto-merge → call MergeEngine.threeWayMerge()
-  - [ ] Markdown + conflict-file → create `.sync-conflict-YYYYMMDD-HHMMSS.md`
-  - [ ] Markdown + local-wins → keep local, overwrite remote
-  - [ ] Markdown + remote-wins → keep remote, overwrite local
-  - [ ] Binary → last-modified-wins (timestamp comparison)
-  - [ ] JSON config → deep merge
-- [ ] Save pre-merge snapshots of both versions before any resolution
-- [ ] Log conflict event to activity log
+- [x] Create `src/sync/ConflictResolver.ts`
+- [x] Implement conflict detection: `localHash ≠ lastSyncedHash AND remoteHash ≠ lastSyncedHash`
+- [x] Dispatch to correct strategy based on file type and settings:
+  - [x] Markdown + auto-merge → call MergeEngine.threeWayMerge()
+  - [x] Markdown + conflict-file → create `.sync-conflict-YYYYMMDD-HHMMSS.md`
+  - [x] Markdown + local-wins → keep local, overwrite remote
+  - [x] Markdown + remote-wins → keep remote, overwrite local
+  - [x] Binary → last-modified-wins (timestamp comparison)
+  - [x] JSON config → deep merge
+- [x] Save pre-merge snapshots of both versions before any resolution
+- [x] Log conflict event to activity log
 
 ### 4.4 Conflict Modal
-- [ ] Create `src/ui/ConflictModal.ts`
-- [ ] Show file path + modification timestamps (local device name, remote device name)
-- [ ] Implement side-by-side diff view (local vs remote, with diff highlighting)
-- [ ] Buttons: "Keep local", "Keep remote", "Auto-merge", "Keep both"
-- [ ] Wire each button to corresponding ConflictResolver strategy
-- [ ] Close modal and trigger sync after resolution
+- [x] Create `src/ui/ConflictModal.ts`
+- [x] Show file path + modification timestamps (local device name, remote device name)
+- [x] Implement side-by-side diff view (local vs remote, with diff highlighting)
+- [x] Buttons: "Keep local", "Keep remote", "Auto-merge", "Keep both"
+- [x] Wire each button to corresponding ConflictResolver strategy
+- [x] Close modal and trigger sync after resolution
 
 ### 4.5 Setup Wizard (Steps 3-5)
-- [ ] Step 3: Initial state detection — scan local vault (hash all files) + scan remote folder (list all files)
-- [ ] Present summary: "GDrive folder is empty — vault will be uploaded" OR "X remote files found — review before proceeding"
-- [ ] Step 4: Conflict review table — for each conflicting file show: path, local size/date, remote size/date, action dropdown (Keep Local / Keep Remote / Keep Both)
-- [ ] Step 5: Confirmation summary — "X files will be uploaded, Y downloaded, Z conflicts resolved" + Confirm button
-- [ ] On confirm: execute initial sync with progress modal
-- [ ] **Never auto-resolve conflicts on first sync** — always require user review
+- [x] Step 3: Initial state detection — scan local vault (hash all files) + scan remote folder (list all files)
+- [x] Present summary: "GDrive folder is empty — vault will be uploaded" OR "X remote files found — review before proceeding"
+- [x] Step 4: Conflict review table — for each conflicting file show: path, local size/date, remote size/date, action dropdown (Keep Local / Keep Remote / Keep Both)
+- [x] Step 5: Confirmation summary — "X files will be uploaded, Y downloaded, Z conflicts resolved" + Confirm button
+- [x] On confirm: execute initial sync with progress modal
+- [x] **Never auto-resolve conflicts on first sync** — always require user review
 
 ---
 
