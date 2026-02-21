@@ -77,8 +77,7 @@ export default class GDriveSyncPlugin extends Plugin {
 			name: 'Pause sync',
 			callback: () => {
 				void (async () => {
-					this.settings.syncPaused = true;
-					await this.saveSettings();
+					await this.syncManager.pauseSync();
 					new Notice('Google Drive sync paused.');
 				})();
 			},
@@ -89,8 +88,7 @@ export default class GDriveSyncPlugin extends Plugin {
 			name: 'Resume sync',
 			callback: () => {
 				void (async () => {
-					this.settings.syncPaused = false;
-					await this.saveSettings();
+					await this.syncManager.resumeSync();
 					new Notice('Google Drive sync resumed.');
 					void this.syncNow();
 				})();

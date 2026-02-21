@@ -23,6 +23,18 @@ If your plugin does not need CSS, delete this file.
 	color: var(--color-red);
 }
 
+.gdrive-sync-status--pending {
+	color: var(--color-orange);
+}
+
+.gdrive-sync-status--offline {
+	color: var(--text-muted);
+}
+
+.gdrive-sync-status--paused {
+	color: var(--text-accent);
+}
+
 .gdrive-sync-button-row {
 	display: flex;
 	justify-content: flex-end;

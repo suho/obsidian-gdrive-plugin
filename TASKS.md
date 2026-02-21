@@ -119,52 +119,52 @@
 ## Phase 3 — Auto-Sync + Offline
 
 ### 3.1 File Watcher
-- [ ] Register `vault.on('modify')` event → add to push queue with quiescence delay
-- [ ] Register `vault.on('create')` event → add to push queue immediately (no debounce)
-- [ ] Register `vault.on('delete')` event → add to push queue immediately
-- [ ] Register `vault.on('rename')` event → add to push queue immediately
-- [ ] Use `this.registerEvent()` for all vault listeners (proper cleanup on unload)
-- [ ] Filter all events through `isExcluded()` before queueing
+- [x] Register `vault.on('modify')` event → add to push queue with quiescence delay
+- [x] Register `vault.on('create')` event → add to push queue immediately (no debounce)
+- [x] Register `vault.on('delete')` event → add to push queue immediately
+- [x] Register `vault.on('rename')` event → add to push queue immediately
+- [x] Use `this.registerEvent()` for all vault listeners (proper cleanup on unload)
+- [x] Filter all events through `isExcluded()` before queueing
 
 ### 3.2 Quiescence-Based Auto-Push
-- [ ] Create `src/utils/debounce.ts` — typed trailing-edge debounce utility
-- [ ] Implement per-file quiescence timer: reset on each `modify` event, fire after `pushQuiescenceMs` of inactivity
-- [ ] On quiescence timer fire: push single file via UploadManager
-- [ ] Ensure `create`/`delete`/`rename` bypass quiescence (immediate push)
+- [x] Create `src/utils/debounce.ts` — typed trailing-edge debounce utility
+- [x] Implement per-file quiescence timer: reset on each `modify` event, fire after `pushQuiescenceMs` of inactivity
+- [x] On quiescence timer fire: push single file via UploadManager
+- [x] Ensure `create`/`delete`/`rename` bypass quiescence (immediate push)
 
 ### 3.3 Periodic Auto-Pull
-- [ ] Register interval via `this.registerInterval()` for pull polling
-- [ ] Pull every `pullIntervalSeconds` using ChangeTracker + DownloadManager
-- [ ] Skip pull if sync is paused (`syncPaused` setting)
-- [ ] Skip pull if offline (connectivity check first)
+- [x] Register interval via `this.registerInterval()` for pull polling
+- [x] Pull every `pullIntervalSeconds` using ChangeTracker + DownloadManager
+- [x] Skip pull if sync is paused (`syncPaused` setting)
+- [x] Skip pull if offline (connectivity check first)
 
 ### 3.4 Offline Queue
-- [ ] Create offline queue data structure in SyncManager
-- [ ] Persist queue to `.obsidian/plugins/gdrive-sync/offline-queue.json` on each change
-- [ ] Load queue on plugin startup
-- [ ] On connectivity restored: replay queue in order, then resume normal sync
-- [ ] Register `window.addEventListener('online')` and `window.addEventListener('offline')`
-- [ ] Use `this.registerDomEvent()` for proper cleanup
+- [x] Create offline queue data structure in SyncManager
+- [x] Persist queue to `.obsidian/plugins/gdrive-sync/offline-queue.json` on each change
+- [x] Load queue on plugin startup
+- [x] On connectivity restored: replay queue in order, then resume normal sync
+- [x] Register `window.addEventListener('online')` and `window.addEventListener('offline')`
+- [x] Use `this.registerDomEvent()` for proper cleanup
 
 ### 3.5 Connectivity Detection
-- [ ] Create `src/utils/network.ts`
-- [ ] Implement `isOnline()` — check `navigator.onLine` + optional GDrive API ping
-- [ ] Implement Wi-Fi detection: check `navigator.connection?.type` (with graceful fallback)
-- [ ] Apply `wifiOnlySync` setting: skip sync on cellular when enabled
+- [x] Create `src/utils/network.ts`
+- [x] Implement `isOnline()` — check `navigator.onLine` + optional GDrive API ping
+- [x] Implement Wi-Fi detection: check `navigator.connection?.type` (with graceful fallback)
+- [x] Apply `wifiOnlySync` setting: skip sync on cellular when enabled
 
 ### 3.6 Visibility Change Handlers (Mobile)
-- [ ] Register `document.visibilitychange` listener via `this.registerDomEvent()`
-- [ ] On `visible`: trigger immediate pull (critical for mobile foreground resume)
-- [ ] On `hidden`: flush pending push queue (mobile going to background)
+- [x] Register `document.visibilitychange` listener via `this.registerDomEvent()`
+- [x] On `visible`: trigger immediate pull (critical for mobile foreground resume)
+- [x] On `hidden`: flush pending push queue (mobile going to background)
 
 ### 3.7 Sync Lock
-- [ ] Add `private syncLock = false` to SyncManager
-- [ ] Guard `runSync()` with lock check: skip if already running
-- [ ] Ensure lock is released in `finally` block (even on errors)
+- [x] Add `private syncLock = false` to SyncManager
+- [x] Guard `runSync()` with lock check: skip if already running
+- [x] Ensure lock is released in `finally` block (even on errors)
 
 ### 3.8 Pause / Resume Commands
-- [ ] Register `pause-sync` command: set `syncPaused = true`, update status bar
-- [ ] Register `resume-sync` command: set `syncPaused = false`, trigger immediate sync, update status bar
+- [x] Register `pause-sync` command: set `syncPaused = true`, update status bar
+- [x] Register `resume-sync` command: set `syncPaused = false`, trigger immediate sync, update status bar
 
 ---
 
