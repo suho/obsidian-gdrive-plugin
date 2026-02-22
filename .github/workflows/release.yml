@@ -68,7 +68,7 @@ jobs:
 
             - name: Validate tag matches manifest version
               run: |
-                  node -e "const fs=require('fs'); const v=JSON.parse(fs.readFileSync('manifest.json','utf8')).version; if (v !== process.env.GITHUB_REF_NAME) { throw new Error(`Tag ${process.env.GITHUB_REF_NAME} does not match manifest version ${v}`); }"
+                  node -e 'const fs=require("fs"); const v=JSON.parse(fs.readFileSync("manifest.json","utf8")).version; const tag=process.env.GITHUB_REF_NAME; if (v !== tag) { throw new Error(`Tag ${tag} does not match manifest version ${v}`); }'
 
             - name: Create GitHub release with Obsidian assets
               uses: softprops/action-gh-release@v2
@@ -109,7 +109,7 @@ jobs:
               env:
                   RELEASE_TAG: ${{ inputs.tag_name }}
               run: |
-                  node -e "const fs=require('fs'); const v=JSON.parse(fs.readFileSync('manifest.json','utf8')).version; if (v !== process.env.RELEASE_TAG) { throw new Error(`Tag ${process.env.RELEASE_TAG} does not match manifest version ${v}`); }"
+                  node -e 'const fs=require("fs"); const v=JSON.parse(fs.readFileSync("manifest.json","utf8")).version; const tag=process.env.RELEASE_TAG; if (v !== tag) { throw new Error(`Tag ${tag} does not match manifest version ${v}`); }'
 
             - name: Create GitHub release with Obsidian assets
               uses: softprops/action-gh-release@v2
