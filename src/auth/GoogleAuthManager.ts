@@ -1,4 +1,4 @@
-import { Notice, Platform, requestUrl } from 'obsidian';
+import { Notice, Platform, requestUrl, type RequestUrlResponse } from 'obsidian';
 import type GDriveSyncPlugin from '../main';
 
 // Google OAuth endpoints
@@ -137,16 +137,16 @@ export class GoogleAuthManager {
 		}
 
 		const response = await this.requestRefreshGrant(normalizedToken);
+		const oauthError = this.getOAuthErrorResponse(response);
 
 		if (response.status === 400 || response.status === 401) {
-			const data = response.json as { error?: string };
-			if (data.error === 'invalid_grant') {
+			if (oauthError.error === 'invalid_grant') {
 				throw new AuthError('Invalid refresh token. Paste the full token and try again.');
 			}
 		}
 
 		if (response.status !== 200) {
-			throw new AuthError(`Token refresh failed (${response.status}): ${response.text}`);
+			throw new AuthError(this.describeTokenEndpointError('Token refresh', response, oauthError));
 		}
 
 		this.plugin.settings.refreshToken = normalizedToken;
@@ -260,6 +260,7 @@ export class GoogleAuthManager {
 			url: TOKEN_ENDPOINT,
 			method: 'POST',
 			headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+			throw: false,
 			body: new URLSearchParams({
 				code,
 				client_id: this.clientId,
@@ -270,7 +271,7 @@ export class GoogleAuthManager {
 		});
 
 		if (response.status !== 200) {
-			throw new Error(`Token exchange failed: ${response.text}`);
+			throw new AuthError(this.describeTokenEndpointError('Token exchange', response));
 		}
 
 		const data = response.json as TokenResponse;
@@ -292,10 +293,10 @@ export class GoogleAuthManager {
 			}
 			throw new AuthError('Network error during token refresh. Please retry.');
 		}
+		const oauthError = this.getOAuthErrorResponse(response);
 
 		if (response.status === 400 || response.status === 401) {
-			const data = response.json as { error?: string };
-			if (data.error === 'invalid_grant') {
+			if (oauthError.error === 'invalid_grant') {
 				// Refresh token has been revoked or expired
 				this.accessToken = '';
 				this.plugin.settings.refreshToken = '';
@@ -312,7 +313,7 @@ export class GoogleAuthManager {
 		}
 
 		if (response.status !== 200) {
-			throw new AuthError(`Token refresh failed (${response.status}): ${response.text}`);
+			throw new AuthError(this.describeTokenEndpointError('Token refresh', response, oauthError));
 		}
 
 		const data = response.json as TokenResponse;
@@ -356,12 +357,79 @@ export class GoogleAuthManager {
 			url: TOKEN_ENDPOINT,
 			method: 'POST',
 			headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+			throw: false,
 			body: new URLSearchParams({
 				grant_type: 'refresh_token',
 				refresh_token: refreshToken,
 				client_id: this.clientId,
 			}).toString(),
 		});
+	}
+
+	private getOAuthErrorResponse(response: RequestUrlResponse): OAuthErrorResponse {
+		if (isObjectRecord(response.json)) {
+			return response.json as OAuthErrorResponse;
+		}
+
+		try {
+			const parsed = JSON.parse(response.text) as unknown;
+			return isObjectRecord(parsed) ? parsed as OAuthErrorResponse : {};
+		} catch {
+			return {};
+		}
+	}
+
+	private describeTokenEndpointError(
+		action: string,
+		response: RequestUrlResponse,
+		oauthError: OAuthErrorResponse = this.getOAuthErrorResponse(response)
+	): string {
+		const details: string[] = [];
+		if (oauthError.error) {
+			details.push(`OAuth error: ${oauthError.error}.`);
+		}
+		if (oauthError.error_description) {
+			details.push(`Details: ${oauthError.error_description}.`);
+		}
+
+		const guidance = this.getOAuthGuidance(oauthError);
+		if (guidance) {
+			details.push(guidance);
+		}
+
+		if (details.length === 0) {
+			details.push(`Request failed with status ${response.status}.`);
+		}
+
+		return `${action} failed (${response.status}). ${details.join(' ')}`;
+	}
+
+	private getOAuthGuidance(oauthError: OAuthErrorResponse): string {
+		switch (oauthError.error) {
+			case 'invalid_client':
+			case 'unauthorized_client':
+				return (
+					'Use a Google OAuth client ID of type "Desktop app" for PKCE without a client secret. ' +
+					'Web application clients typically require client_secret and will fail in this plugin.'
+				);
+			case 'invalid_grant':
+				return (
+					'The authorization code or refresh token is invalid or expired. ' +
+					'Retry sign-in and confirm your system clock is correct.'
+				);
+			case 'redirect_uri_mismatch':
+				return 'The redirect URI does not match this OAuth client configuration.';
+			case 'invalid_request':
+				if (oauthError.error_description?.toLowerCase().includes('client_secret')) {
+					return (
+						'Google reported that a client secret is required. ' +
+						'Switch to a Desktop app OAuth client ID to use PKCE-only login.'
+					);
+				}
+				return '';
+			default:
+				return '';
+		}
 	}
 
 	private async storeTokens(data: TokenResponse): Promise<void> {
@@ -580,6 +648,15 @@ interface TokenResponse {
 	refresh_token?: string;
 	expires_in?: number;
 	token_type: string;
+}
+
+interface OAuthErrorResponse {
+	error?: string;
+	error_description?: string;
+}
+
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === 'object' && value !== null;
 }
 
 export class AuthError extends Error {

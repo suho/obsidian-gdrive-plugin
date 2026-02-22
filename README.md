@@ -142,6 +142,11 @@ Create `.env` at repository root:
 GDRIVE_CLIENT_ID=your_google_oauth_client_id
 ```
 
+Use a Google OAuth client of type `Desktop app` for this PKCE flow.
+
+- `Web application` clients commonly require `client_secret` at the token endpoint and can fail with HTTP `400`/`401` in this plugin.
+- Desktop login uses a loopback callback: `http://127.0.0.1:<random-port>/callback`.
+
 ### Run in watch mode
 
 ```bash
