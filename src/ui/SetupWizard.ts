@@ -1,4 +1,4 @@
-import { App, Modal, Notice, Platform, Setting, normalizePath } from 'obsidian';
+import { App, Modal, Notice, Platform, Setting, normalizePath, setIcon } from 'obsidian';
 import type GDriveSyncPlugin from '../main';
 import type { DriveFileWithPath } from '../gdrive/DriveClient';
 import type { DriveFileMetadata } from '../types';
@@ -102,6 +102,30 @@ function conflictFilePath(path: string, timestamp: number): string {
 	const mi = String(date.getMinutes()).padStart(2, '0');
 	const ss = String(date.getSeconds()).padStart(2, '0');
 	return normalizePath(`${stem}.sync-conflict-${yyyy}${mm}${dd}-${hh}${mi}${ss}${ext}`);
+}
+
+function canonicalPathForRemoteVariant(path: string): string | null {
+	const normalizedPath = normalizePath(path);
+	const segments = normalizedPath.split('/');
+	const fileName = segments.pop() ?? normalizedPath;
+	const dotIndex = fileName.lastIndexOf('.');
+	const stem = dotIndex >= 0 ? fileName.slice(0, dotIndex) : fileName;
+	const ext = dotIndex >= 0 ? fileName.slice(dotIndex) : '';
+
+	if (!stem.endsWith('.remote')) {
+		return null;
+	}
+
+	const canonicalName = `${stem.slice(0, -'.remote'.length)}${ext}`;
+	if (!canonicalName || canonicalName === fileName) {
+		return null;
+	}
+
+	if (segments.length === 0) {
+		return normalizePath(canonicalName);
+	}
+
+	return normalizePath(`${segments.join('/')}/${canonicalName}`);
 }
 
 function defaultConflictAction(): InitialConflictAction {
@@ -465,7 +489,10 @@ export class SetupWizard extends Modal {
 		this.titleEl.setText('Initial sync review');
 
 		if (this.planningInProgress) {
-			this.contentEl.createEl('p').setText('Scanning local and remote files. This may take a moment.');
+			const loading = this.contentEl.createDiv({ cls: 'gdrive-sync-loading' });
+			const loadingIcon = loading.createSpan({ cls: 'gdrive-sync-loading-icon gdrive-sync-spin' });
+			setIcon(loadingIcon, 'refresh-cw');
+			loading.createSpan({ text: 'Scanning local and remote files. This may take a moment.' });
 			return;
 		}
 
@@ -709,18 +736,21 @@ export class SetupWizard extends Modal {
 
 		try {
 			const localFiles = await this.scanLocalFiles();
+			const localPaths = new Set<string>(localFiles.keys());
 			const sharedPaths = new Set<string>();
 			const remoteWithPaths = await this.plugin.driveClient.listAllFilesRecursiveWithPaths(
 				this.selectedFolderId || this.plugin.settings.gDriveFolderId
 			);
+			const remotePaths = new Set<string>();
 			for (const item of remoteWithPaths) {
 				const normalizedPath = normalizePath(item.path);
+				remotePaths.add(normalizedPath);
 				if (localFiles.has(normalizedPath)) {
 					sharedPaths.add(normalizedPath);
 				}
 			}
 
-			const remoteFiles = await this.scanRemoteFiles(remoteWithPaths, sharedPaths);
+			const remoteFiles = await this.scanRemoteFiles(remoteWithPaths, sharedPaths, remotePaths, localPaths);
 			const uploads: LocalScanFile[] = [];
 			const downloads: RemoteScanFile[] = [];
 			const conflicts: InitialConflictItem[] = [];
@@ -829,18 +859,23 @@ export class SetupWizard extends Modal {
 				progressModal.updateProgress(completedOperations, conflict.path);
 			}
 
-			this.initialSyncProgress = `Uploading ${plan.uploads.length} local files...`;
-			this.renderStep();
-			for (const localFile of plan.uploads) {
-				if (progressModal.isCancelled()) {
-					throw new Error('Initial sync cancelled by user.');
+				this.initialSyncProgress = `Uploading ${plan.uploads.length} local files...`;
+				this.renderStep();
+				for (const localFile of plan.uploads) {
+					if (progressModal.isCancelled()) {
+						throw new Error('Initial sync cancelled by user.');
+					}
+					await this.uploadLocalFile(localFile.path, folderId);
+					completedOperations += 1;
+					progressModal.updateProgress(completedOperations, localFile.path);
 				}
-				await this.uploadLocalFile(localFile.path, folderId);
-				completedOperations += 1;
-				progressModal.updateProgress(completedOperations, localFile.path);
-			}
 
-			await syncDb.save();
+				this.initialSyncProgress = 'Cleaning duplicate files...';
+				this.renderStep();
+				progressModal.updateProgress(Math.max(completedOperations, totalOperations), 'Cleaning duplicate files...');
+				await this.cleanupDuplicateArtifacts(folderId, () => progressModal?.isCancelled() ?? false);
+
+				await syncDb.save();
 
 			this.initialSyncProgress = 'Finalizing setup...';
 			this.renderStep();
@@ -955,12 +990,18 @@ export class SetupWizard extends Modal {
 
 	private async scanRemoteFiles(
 		remoteWithPaths: DriveFileWithPath[],
-		sharedPaths: Set<string>
+		sharedPaths: Set<string>,
+		remotePaths: Set<string>,
+		localPaths: Set<string>
 	): Promise<Map<string, RemoteScanFile>> {
 		const remoteFiles = new Map<string, RemoteScanFile>();
 
 		for (const item of remoteWithPaths) {
 			const path = normalizePath(item.path);
+			const canonicalPath = canonicalPathForRemoteVariant(path);
+			if (canonicalPath && (remotePaths.has(canonicalPath) || localPaths.has(canonicalPath))) {
+				continue;
+			}
 			const size = Number(item.file.size ?? 0);
 			if (this.isPathExcluded(path, Number.isFinite(size) ? size : undefined)) {
 				continue;
@@ -972,17 +1013,288 @@ export class SetupWizard extends Modal {
 				hash = await computeContentHash(content);
 			}
 
-			remoteFiles.set(path, {
+			const candidate: RemoteScanFile = {
 				path,
 				fileId: item.file.id,
 				mimeType: item.file.mimeType,
 				size,
 				modified: parseRemoteModifiedTime(item.file.modifiedTime),
 				hash,
-			});
+			};
+
+			const existing = remoteFiles.get(path);
+			if (!existing || candidate.modified >= existing.modified) {
+				remoteFiles.set(path, candidate);
+			}
 		}
 
 		return remoteFiles;
+	}
+
+	private async cleanupDuplicateArtifacts(folderId: string, shouldCancel: () => boolean): Promise<void> {
+		const remoteWithPaths = await this.plugin.driveClient.listAllFilesRecursiveWithPaths(folderId);
+		const remoteByPath = new Map<string, DriveFileWithPath[]>();
+		for (const remoteEntry of remoteWithPaths) {
+			const path = normalizePath(remoteEntry.path);
+			const remoteSize = remoteEntry.file.size ? Number(remoteEntry.file.size) : undefined;
+			if (this.isPathExcluded(path, Number.isFinite(remoteSize) ? remoteSize : undefined)) {
+				continue;
+			}
+			const bucket = remoteByPath.get(path) ?? [];
+			bucket.push(remoteEntry);
+			remoteByPath.set(path, bucket);
+		}
+
+		const localHashCache = new Map<string, string | null>();
+		const remoteHashCache = new Map<string, string>();
+		const remoteContentCache = new Map<string, ArrayBuffer>();
+		const getLocalHash = async (path: string): Promise<string | null> => {
+			const normalizedPath = normalizePath(path);
+			if (localHashCache.has(normalizedPath)) {
+				return localHashCache.get(normalizedPath) ?? null;
+			}
+			if (!await this.plugin.app.vault.adapter.exists(normalizedPath)) {
+				localHashCache.set(normalizedPath, null);
+				return null;
+			}
+			const content = await this.plugin.app.vault.adapter.readBinary(normalizedPath);
+			const hash = await computeContentHash(content);
+			localHashCache.set(normalizedPath, hash);
+			return hash;
+		};
+		const getRemoteContent = async (fileId: string): Promise<ArrayBuffer> => {
+			const cached = remoteContentCache.get(fileId);
+			if (cached) {
+				return cached;
+			}
+			const content = await this.plugin.driveClient.downloadFile(fileId);
+			remoteContentCache.set(fileId, content);
+			return content;
+		};
+		const getRemoteHash = async (entry: DriveFileWithPath): Promise<string> => {
+			const cached = remoteHashCache.get(entry.file.id);
+			if (cached) {
+				return cached;
+			}
+			const md5 = entry.file.md5Checksum;
+			if (md5) {
+				remoteHashCache.set(entry.file.id, md5);
+				return md5;
+			}
+			const content = await getRemoteContent(entry.file.id);
+			const hash = await computeContentHash(content);
+			remoteHashCache.set(entry.file.id, hash);
+			return hash;
+		};
+
+		const processedRemoteIds = new Set<string>();
+		for (const [path, entries] of remoteByPath.entries()) {
+			if (entries.length <= 1) {
+				continue;
+			}
+			if (shouldCancel()) {
+				throw new Error('Initial sync cancelled by user.');
+			}
+
+			const keepEntry = this.pickPrimaryRemoteEntry(path, entries);
+			const localHash = await getLocalHash(path);
+			const referenceHash = localHash ?? await getRemoteHash(keepEntry);
+			await this.ensureSyncRecordForResolvedPath(path, keepEntry, referenceHash);
+
+			for (const duplicateEntry of entries) {
+				if (duplicateEntry.file.id === keepEntry.file.id || processedRemoteIds.has(duplicateEntry.file.id)) {
+					continue;
+				}
+				if (shouldCancel()) {
+					throw new Error('Initial sync cancelled by user.');
+				}
+				try {
+					const duplicateHash = await getRemoteHash(duplicateEntry);
+					if (duplicateHash !== referenceHash) {
+						const duplicateContent = await getRemoteContent(duplicateEntry.file.id);
+						await this.persistRemoteConflictCopy(path, duplicateContent, folderId);
+					}
+					await this.plugin.driveClient.trashFile(duplicateEntry.file.id);
+					processedRemoteIds.add(duplicateEntry.file.id);
+					const duplicateRecord = this.plugin.syncManager.syncDb.getByGDriveId(duplicateEntry.file.id);
+					if (duplicateRecord) {
+						this.plugin.syncManager.syncDb.deleteRecord(duplicateRecord.localPath);
+					}
+				} catch (err) {
+					console.warn('Failed to resolve duplicate remote file', duplicateEntry.file.id, err);
+				}
+			}
+		}
+
+		for (const [path, entries] of remoteByPath.entries()) {
+			const canonicalPath = canonicalPathForRemoteVariant(path);
+			if (!canonicalPath) {
+				continue;
+			}
+			const canonicalEntries = remoteByPath.get(canonicalPath);
+			if (!canonicalEntries || canonicalEntries.length === 0) {
+				continue;
+			}
+			const keepEntry = this.pickPrimaryRemoteEntry(canonicalPath, canonicalEntries);
+			const referenceHash = (await getLocalHash(canonicalPath)) ?? await getRemoteHash(keepEntry);
+			for (const variantEntry of entries) {
+				if (processedRemoteIds.has(variantEntry.file.id)) {
+					continue;
+				}
+				if (shouldCancel()) {
+					throw new Error('Initial sync cancelled by user.');
+				}
+				try {
+					const variantHash = await getRemoteHash(variantEntry);
+					if (variantHash !== referenceHash) {
+						const variantContent = await getRemoteContent(variantEntry.file.id);
+						await this.persistRemoteConflictCopy(canonicalPath, variantContent, folderId);
+					}
+					await this.plugin.driveClient.trashFile(variantEntry.file.id);
+					processedRemoteIds.add(variantEntry.file.id);
+					const duplicateRecord = this.plugin.syncManager.syncDb.getByGDriveId(variantEntry.file.id);
+					if (duplicateRecord) {
+						this.plugin.syncManager.syncDb.deleteRecord(duplicateRecord.localPath);
+					}
+				} catch (err) {
+					console.warn('Failed to resolve remote .remote variant', variantEntry.file.id, err);
+				}
+			}
+		}
+
+		await this.cleanupLocalRemoteVariantFiles(shouldCancel);
+	}
+
+	private pickPrimaryRemoteEntry(path: string, entries: DriveFileWithPath[]): DriveFileWithPath {
+		if (entries.length === 0) {
+			throw new Error(`No remote files found for ${path}`);
+		}
+
+		const trackedRecord = this.plugin.syncManager.syncDb.getRecord(path);
+		if (trackedRecord) {
+			const trackedEntry = entries.find(entry => entry.file.id === trackedRecord.gDriveFileId);
+			if (trackedEntry) {
+				return trackedEntry;
+			}
+		}
+
+		let selected = entries[0]!;
+		for (const entry of entries.slice(1)) {
+			const entryModified = parseRemoteModifiedTime(entry.file.modifiedTime);
+			const selectedModified = parseRemoteModifiedTime(selected.file.modifiedTime);
+			if (entryModified > selectedModified) {
+				selected = entry;
+			}
+		}
+		return selected;
+	}
+
+	private async ensureSyncRecordForResolvedPath(path: string, remoteEntry: DriveFileWithPath, syncedHash: string): Promise<void> {
+		const existingRecord = this.plugin.syncManager.syncDb.getRecord(path);
+		const existsLocally = await this.plugin.app.vault.adapter.exists(path);
+		if (!existingRecord && !existsLocally) {
+			return;
+		}
+
+		this.plugin.syncManager.syncDb.setRecord(path, {
+			gDriveFileId: remoteEntry.file.id,
+			localPath: path,
+			localHash: syncedHash,
+			remoteHash: syncedHash,
+			lastSyncedTimestamp: Date.now(),
+			status: 'synced',
+		});
+	}
+
+	private async persistRemoteConflictCopy(path: string, content: ArrayBuffer, folderId: string): Promise<void> {
+		const candidate = conflictFilePath(path, Date.now());
+		const conflictPath = await this.resolveAvailablePath(candidate);
+		await this.ensureParentDirectories(conflictPath);
+		await this.plugin.app.vault.adapter.writeBinary(conflictPath, content);
+		await this.uploadLocalFile(conflictPath, folderId);
+	}
+
+	private async cleanupLocalRemoteVariantFiles(shouldCancel: () => boolean): Promise<void> {
+		const localPaths = await this.collectAllLocalPaths();
+		for (const path of localPaths) {
+			const canonicalPath = canonicalPathForRemoteVariant(path);
+			if (!canonicalPath) {
+				continue;
+			}
+			const stat = await this.plugin.app.vault.adapter.stat(path);
+			if (this.isPathExcluded(path, stat?.size)) {
+				continue;
+			}
+			if (shouldCancel()) {
+				throw new Error('Initial sync cancelled by user.');
+			}
+
+			if (await this.plugin.app.vault.adapter.exists(canonicalPath)) {
+				const remoteVariantHash = await this.computeLocalHash(path);
+				const canonicalHash = await this.computeLocalHash(canonicalPath);
+				if (remoteVariantHash === canonicalHash) {
+					await this.plugin.app.vault.adapter.remove(path);
+					await this.plugin.syncManager.snapshotManager.deleteSnapshot(path);
+					const duplicateRecord = this.plugin.syncManager.syncDb.getRecord(path);
+					if (duplicateRecord) {
+						this.plugin.syncManager.syncDb.deleteRecord(path);
+					}
+					continue;
+				}
+
+				const conflictPath = await this.resolveAvailablePath(conflictFilePath(canonicalPath, Date.now()));
+				await this.plugin.app.vault.adapter.rename(path, conflictPath);
+				await this.plugin.syncManager.snapshotManager.renameSnapshot(path, conflictPath);
+				const existingRecord = this.plugin.syncManager.syncDb.getRecord(path);
+				if (existingRecord) {
+					this.plugin.syncManager.syncDb.deleteRecord(path);
+					this.plugin.syncManager.syncDb.setRecord(conflictPath, {
+						...existingRecord,
+						localPath: conflictPath,
+					});
+				}
+				continue;
+			}
+
+			try {
+				await this.ensureParentDirectories(canonicalPath);
+				await this.plugin.app.vault.adapter.rename(path, canonicalPath);
+				await this.plugin.syncManager.snapshotManager.renameSnapshot(path, canonicalPath);
+				const existingRecord = this.plugin.syncManager.syncDb.getRecord(path);
+				if (existingRecord) {
+					this.plugin.syncManager.syncDb.deleteRecord(path);
+					this.plugin.syncManager.syncDb.setRecord(canonicalPath, {
+						...existingRecord,
+						localPath: canonicalPath,
+					});
+				}
+			} catch (err) {
+				console.warn('Failed to normalize local .remote file', path, err);
+			}
+		}
+	}
+
+	private async resolveAvailablePath(path: string): Promise<string> {
+		const normalizedPath = normalizePath(path);
+		if (!await this.plugin.app.vault.adapter.exists(normalizedPath)) {
+			return normalizedPath;
+		}
+
+		const dot = normalizedPath.lastIndexOf('.');
+		const stem = dot >= 0 ? normalizedPath.slice(0, dot) : normalizedPath;
+		const ext = dot >= 0 ? normalizedPath.slice(dot) : '';
+		let counter = 1;
+		let candidate = normalizePath(`${stem}-${counter}${ext}`);
+		while (await this.plugin.app.vault.adapter.exists(candidate)) {
+			counter += 1;
+			candidate = normalizePath(`${stem}-${counter}${ext}`);
+		}
+		return candidate;
+	}
+
+	private async computeLocalHash(path: string): Promise<string> {
+		const content = await this.plugin.app.vault.adapter.readBinary(path);
+		return computeContentHash(content);
 	}
 
 	private async collectAllLocalPaths(): Promise<string[]> {

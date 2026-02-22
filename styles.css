@@ -335,6 +335,22 @@ If your plugin does not need CSS, delete this file.
 	color: var(--text-muted);
 }
 
+.gdrive-sync-loading {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin-top: 6px;
+}
+
+.gdrive-sync-loading-icon {
+	width: 16px;
+	height: 16px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	color: var(--text-accent);
+}
+
 @media (max-width: 900px) {
 	.gdrive-sync-conflict-split {
 		grid-template-columns: 1fr;
