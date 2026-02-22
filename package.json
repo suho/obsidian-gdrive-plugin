@@ -8,6 +8,7 @@
 		"dev": "node esbuild.config.mjs",
 		"build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
 		"lint": "eslint .",
+		"version:bump": "node bump-version.mjs",
 		"versions": "node version-bump.mjs"
 	},
 	"keywords": [],

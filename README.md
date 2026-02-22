@@ -166,7 +166,16 @@ Bundle target: under 200 KB.
 
 ## Release prep
 
-1. Update versions in `manifest.json`, `manifest-beta.json`, and `package.json`.
+1. Bump plugin version in `manifest.json`, `manifest-beta.json`, and `package.json`:
+
+```bash
+# Default: bump minor (x.(y+1).0)
+npm run version:bump
+
+# Optional: set explicit version
+npm run version:bump -- 0.16.0
+```
+
 2. Run `npm run versions` to add/update the current plugin version mapping in `versions.json`.
 3. Add extra supported plugin versions when needed:
 
