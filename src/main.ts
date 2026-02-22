@@ -187,6 +187,14 @@ export default class GDriveSyncPlugin extends Plugin {
 				this.cleanDuplicateArtifacts();
 			},
 		});
+
+		this.addCommand({
+			id: 'reset-sync-state',
+			name: 'Reset sync state',
+			callback: () => {
+				this.resetSyncState();
+			},
+		});
 	}
 
 	private registerFileMenuEntry(): void {
