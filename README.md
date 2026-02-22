@@ -176,6 +176,8 @@ npm run version:bump
 npm run version:bump -- 0.16.0
 ```
 
+`version:bump` also runs `npm install` to keep `package-lock.json` in sync.
+
 2. Run `npm run versions` to add/update the current plugin version mapping in `versions.json`.
 3. Add extra supported plugin versions when needed:
 
@@ -190,9 +192,17 @@ npm run versions -- --from 0.15.0 --to 0.15.3
 ```
 
 5. Build `main.js`.
-6. Tag a GitHub release exactly as the plugin version (no `v` prefix).
-7. Upload `main.js`, `manifest.json`, and `styles.css` as release assets.
-8. Validate against Obsidian policy/guideline checklist in `docs/community-submission-checklist.md`.
+6. Create and push a git tag that matches the version in `package.json`, `manifest.json`, and `manifest-beta.json`:
+
+```bash
+npm run release:tag
+```
+
+The script stops without tagging if any of those versions differ.
+
+7. Tag a GitHub release exactly as the plugin version (no `v` prefix).
+8. Upload `main.js`, `manifest.json`, and `styles.css` as release assets.
+9. Validate against Obsidian policy/guideline checklist in `docs/community-submission-checklist.md`.
 
 ## License
 
