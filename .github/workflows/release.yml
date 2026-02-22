@@ -4,9 +4,47 @@ on:
     push:
         tags:
             - "*"
+            - "!beta"
+            - "!beta-*"
+    workflow_call:
+        inputs:
+            tag_name:
+                description: Release tag to create.
+                required: true
+                type: string
+            release_name:
+                description: Optional release display name.
+                required: false
+                type: string
+            prerelease:
+                description: Mark release as prerelease.
+                required: false
+                default: false
+                type: boolean
+            generate_release_notes:
+                description: Generate release notes automatically.
+                required: false
+                default: true
+                type: boolean
+            make_latest:
+                description: Mark release as latest.
+                required: false
+                default: true
+                type: boolean
+            allow_updates:
+                description: Allow updates to an existing release for the same tag.
+                required: false
+                default: false
+                type: boolean
+            verify_manifest_tag:
+                description: Ensure tag matches manifest.json version.
+                required: false
+                default: true
+                type: boolean
 
 jobs:
-    release:
+    release-from-tag:
+        if: ${{ github.event_name == 'push' }}
         runs-on: ubuntu-latest
         permissions:
             contents: write
@@ -25,15 +63,8 @@ jobs:
 
             - name: Verify and build
               run: |
-                  if [ -z "${GDRIVE_CLIENT_ID}" ] || [ -z "${GDRIVE_CLIENT_SECRET}" ]; then
-                      echo "Missing GDRIVE_CLIENT_ID or GDRIVE_CLIENT_SECRET repository secrets."
-                      exit 1
-                  fi
                   npm run lint
                   npm run build
-              env:
-                  GDRIVE_CLIENT_ID: ${{ secrets.GDRIVE_CLIENT_ID }}
-                  GDRIVE_CLIENT_SECRET: ${{ secrets.GDRIVE_CLIENT_SECRET }}
 
             - name: Validate tag matches manifest version
               run: |
@@ -43,6 +74,52 @@ jobs:
               uses: softprops/action-gh-release@v2
               with:
                   generate_release_notes: true
+                  files: |
+                      manifest.json
+                      manifest-beta.json
+                      main.js
+                      styles.css
+                      versions.json
+
+    release-from-call:
+        if: ${{ github.event_name == 'workflow_call' }}
+        runs-on: ubuntu-latest
+        permissions:
+            contents: write
+
+        steps:
+            - uses: actions/checkout@v4
+
+            - name: Use Node.js 20.x
+              uses: actions/setup-node@v4
+              with:
+                  node-version: 20.x
+                  cache: npm
+
+            - name: Install dependencies
+              run: npm ci
+
+            - name: Verify and build
+              run: |
+                  npm run lint
+                  npm run build
+
+            - name: Validate tag matches manifest version
+              if: ${{ inputs.verify_manifest_tag }}
+              env:
+                  RELEASE_TAG: ${{ inputs.tag_name }}
+              run: |
+                  node -e "const fs=require('fs'); const v=JSON.parse(fs.readFileSync('manifest.json','utf8')).version; if (v !== process.env.RELEASE_TAG) { throw new Error(`Tag ${process.env.RELEASE_TAG} does not match manifest version ${v}`); }"
+
+            - name: Create GitHub release with Obsidian assets
+              uses: softprops/action-gh-release@v2
+              with:
+                  tag_name: ${{ inputs.tag_name }}
+                  name: ${{ inputs.release_name || inputs.tag_name }}
+                  prerelease: ${{ inputs.prerelease }}
+                  generate_release_notes: ${{ inputs.generate_release_notes }}
+                  make_latest: ${{ inputs.make_latest }}
+                  allow_updates: ${{ inputs.allow_updates }}
                   files: |
                       manifest.json
                       manifest-beta.json

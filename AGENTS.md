@@ -109,10 +109,10 @@ Do not add new Node.js imports anywhere else. Use Web APIs or Obsidian's `reques
 
 #### `@typescript-eslint/no-unsafe-*` — unsafe `any` access
 
-Unavoidable when reading build-time injected globals (e.g. `__GDRIVE_CLIENT_ID__` injected by esbuild). Use a scoped disable block:
+Sometimes unavoidable when reading untyped globals. Use a scoped disable block:
 ```ts
 /* eslint-disable @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-explicit-any */
-this.clientId = ((globalThis as any).__GDRIVE_CLIENT_ID__ as string | undefined) ?? '';
+this.someValue = ((globalThis as any).__SOME_GLOBAL__ as string | undefined) ?? '';
 /* eslint-enable @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-explicit-any */
 ```
 
