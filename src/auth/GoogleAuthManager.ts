@@ -20,7 +20,6 @@ const REFRESH_BUFFER_MS = 5 * 60 * 1000;
 const MOBILE_AUTH_TIMEOUT_MS = 5 * 60 * 1000;
 const REFRESH_RETRY_COUNT = 2;
 const REFRESH_RETRY_BASE_MS = 1000;
-const SESSION_CODE_VERIFIER_KEY = 'gdrive_code_verifier';
 const SESSION_OAUTH_STATE_KEY = 'gdrive_oauth_state';
 
 export class GoogleAuthManager {
@@ -80,14 +79,12 @@ export class GoogleAuthManager {
 			);
 		}
 
-		const codeVerifier = this.generateCodeVerifier();
-		const codeChallenge = await this.generateCodeChallenge(codeVerifier);
 		const state = this.generateState();
 
 		if (Platform.isMobile) {
-			await this.authenticateMobile(codeVerifier, codeChallenge, state);
+			await this.authenticateMobile(state);
 		} else {
-			await this.authenticateDesktop(codeVerifier, codeChallenge, state);
+			await this.authenticateDesktop(state);
 		}
 	}
 
@@ -114,7 +111,6 @@ export class GoogleAuthManager {
 		this.plugin.settings.lastSyncPageToken = '';
 		this.plugin.settings.setupComplete = false;
 		this.plugin.settings.pendingOAuthState = '';
-		this.plugin.settings.pendingCodeVerifier = '';
 		this.clearSessionMobileAuthData();
 		this.rejectMobileAuthWaiter(new Error('Authentication was cancelled.'));
 		this.clearReauthenticateNotice();
@@ -160,8 +156,6 @@ export class GoogleAuthManager {
 	// ── Desktop flow ──────────────────────────────────────────────────
 
 	private async authenticateDesktop(
-		codeVerifier: string,
-		codeChallenge: string,
 		state: string
 	): Promise<void> {
 		// Load desktop-only callback server lazily so mobile can run without Node built-ins.
@@ -169,7 +163,7 @@ export class GoogleAuthManager {
 		const callbackServer = new OAuthCallbackServer();
 		const redirectUri = await callbackServer.start();
 
-		const authUrl = this.buildAuthUrl(codeChallenge, state, redirectUri);
+		const authUrl = this.buildAuthUrl(state, redirectUri);
 
 		// Open the browser
 		window.open(authUrl);
@@ -182,20 +176,16 @@ export class GoogleAuthManager {
 			throw new Error('OAuth state mismatch — possible CSRF attack');
 		}
 
-		await this.exchangeCode(code, codeVerifier, redirectUri);
+		await this.exchangeCode(code, redirectUri);
 	}
 
 	// ── Mobile flow ───────────────────────────────────────────────────
 
-	private async authenticateMobile(
-		codeVerifier: string,
-		codeChallenge: string,
-		state: string
-	): Promise<void> {
-		const authUrl = this.buildAuthUrl(codeChallenge, state, MOBILE_REDIRECT_URI, {
+	private async authenticateMobile(state: string): Promise<void> {
+		const authUrl = this.buildAuthUrl(state, MOBILE_REDIRECT_URI, {
 			forceAccountChooser: true,
 		});
-		await this.savePendingMobileAuthData(state, codeVerifier);
+		await this.savePendingMobileAuthData(state);
 		const waitForCallback = this.waitForMobileCallback();
 
 		window.open(authUrl);
@@ -227,7 +217,7 @@ export class GoogleAuthManager {
 			throw callbackError;
 		}
 
-		const { state: expectedState, codeVerifier } = this.getPendingMobileAuthData();
+		const expectedState = this.getPendingMobileAuthState();
 		await this.clearPendingMobileAuthData();
 
 		if (returnedState !== expectedState) {
@@ -236,14 +226,8 @@ export class GoogleAuthManager {
 			throw stateError;
 		}
 
-		if (!codeVerifier) {
-			const verifierError = new Error('Missing PKCE code verifier — please retry authentication');
-			this.rejectMobileAuthWaiter(verifierError);
-			throw verifierError;
-		}
-
 		try {
-			await this.exchangeCode(code, codeVerifier, MOBILE_REDIRECT_URI);
+			await this.exchangeCode(code, MOBILE_REDIRECT_URI);
 		} catch (err) {
 			const authError = err instanceof Error ? err : new Error(String(err));
 			this.rejectMobileAuthWaiter(authError);
@@ -255,14 +239,13 @@ export class GoogleAuthManager {
 
 	// ── Token exchange ────────────────────────────────────────────────
 
-	private async exchangeCode(code: string, codeVerifier: string, redirectUri: string): Promise<void> {
+	private async exchangeCode(code: string, redirectUri: string): Promise<void> {
 		const clientId = this.getClientId();
 		const body = new URLSearchParams({
 			code,
 			client_id: clientId,
 			redirect_uri: redirectUri,
 			grant_type: 'authorization_code',
-			code_verifier: codeVerifier,
 		});
 		this.appendClientSecret(body);
 
@@ -416,8 +399,8 @@ export class GoogleAuthManager {
 			case 'invalid_client':
 			case 'unauthorized_client':
 				return (
-					'Use a Google OAuth client ID of type "Desktop app" for PKCE without a client secret. ' +
-					'Web application clients typically require client_secret and will fail in this plugin.'
+					'Verify the OAuth client ID and client secret in plugin settings. ' +
+					'Google rejected the client credentials for this request.'
 				);
 			case 'invalid_grant':
 				return (
@@ -533,24 +516,19 @@ export class GoogleAuthManager {
 		this.reauthNotice = null;
 	}
 
-	private async savePendingMobileAuthData(state: string, codeVerifier: string): Promise<void> {
+	private async savePendingMobileAuthData(state: string): Promise<void> {
 		this.plugin.settings.pendingOAuthState = state;
-		this.plugin.settings.pendingCodeVerifier = codeVerifier;
 		await this.plugin.saveSettings();
 		sessionStorage.setItem(SESSION_OAUTH_STATE_KEY, state);
-		sessionStorage.setItem(SESSION_CODE_VERIFIER_KEY, codeVerifier);
 	}
 
-	private getPendingMobileAuthData(): { state: string; codeVerifier: string } {
-		const state = this.plugin.settings.pendingOAuthState || sessionStorage.getItem(SESSION_OAUTH_STATE_KEY) || '';
-		const codeVerifier = this.plugin.settings.pendingCodeVerifier || sessionStorage.getItem(SESSION_CODE_VERIFIER_KEY) || '';
-		return { state, codeVerifier };
+	private getPendingMobileAuthState(): string {
+		return this.plugin.settings.pendingOAuthState || sessionStorage.getItem(SESSION_OAUTH_STATE_KEY) || '';
 	}
 
 	private async clearPendingMobileAuthData(): Promise<void> {
-		const hadPendingData = !!this.plugin.settings.pendingOAuthState || !!this.plugin.settings.pendingCodeVerifier;
+		const hadPendingData = !!this.plugin.settings.pendingOAuthState;
 		this.plugin.settings.pendingOAuthState = '';
-		this.plugin.settings.pendingCodeVerifier = '';
 		this.clearSessionMobileAuthData();
 		if (hadPendingData) {
 			await this.plugin.saveSettings();
@@ -559,7 +537,6 @@ export class GoogleAuthManager {
 
 	private clearSessionMobileAuthData(): void {
 		sessionStorage.removeItem(SESSION_OAUTH_STATE_KEY);
-		sessionStorage.removeItem(SESSION_CODE_VERIFIER_KEY);
 	}
 
 	private waitForMobileCallback(): Promise<void> {
@@ -610,20 +587,6 @@ export class GoogleAuthManager {
 		}
 	}
 
-	// ── PKCE helpers ──────────────────────────────────────────────────
-
-	private generateCodeVerifier(): string {
-		const array = new Uint8Array(32);
-		crypto.getRandomValues(array);
-		return base64UrlEncode(array);
-	}
-
-	private async generateCodeChallenge(verifier: string): Promise<string> {
-		const encoded = new TextEncoder().encode(verifier);
-		const digest = await crypto.subtle.digest('SHA-256', encoded);
-		return base64UrlEncode(new Uint8Array(digest));
-	}
-
 	private generateState(): string {
 		const array = new Uint8Array(16);
 		crypto.getRandomValues(array);
@@ -631,7 +594,6 @@ export class GoogleAuthManager {
 	}
 
 	private buildAuthUrl(
-		codeChallenge: string,
 		state: string,
 		redirectUri: string,
 		options?: { forceAccountChooser?: boolean }
@@ -647,8 +609,6 @@ export class GoogleAuthManager {
 			response_type: 'code',
 			scope: SCOPE,
 			state,
-			code_challenge: codeChallenge,
-			code_challenge_method: 'S256',
 			access_type: 'offline',
 			prompt: promptValues.join(' '), // Keep refresh token behavior and optionally force account selection
 		});

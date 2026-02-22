@@ -1,6 +1,6 @@
 # Google Drive Sync for Obsidian
 
-Sync your Obsidian vault with Google Drive using OAuth 2.0 + PKCE, with incremental pull/push, conflict handling, selective sync, and offline recovery.
+Sync your Obsidian vault with Google Drive using OAuth 2.0, with incremental pull/push, conflict handling, selective sync, and offline recovery.
 
 > [!IMPORTANT]
 > This plugin uses Google Drive scope `drive.file`.
@@ -9,7 +9,7 @@ Sync your Obsidian vault with Google Drive using OAuth 2.0 + PKCE, with incremen
 
 ## Features
 
-- OAuth 2.0 authentication with PKCE
+- OAuth 2.0 authentication
 - Setup wizard for account + target folder
 - Incremental pull via Google Drive Changes API
 - Local file watcher with quiescence-based upload

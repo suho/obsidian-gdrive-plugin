@@ -63,7 +63,7 @@
 
 3. **Delta sync, not full sync.** Only changed files are uploaded/downloaded, using GDrive's `modifiedTime` and MD5 checksums.
 
-4. **OAuth 2.0 with PKCE.** No third-party proxy server. Localhost redirect for desktop, custom URI scheme (`obsidian://gdrive-callback`) for mobile.
+4. **OAuth 2.0 authorization code flow.** No third-party proxy server. Localhost redirect for desktop, custom URI scheme (`obsidian://gdrive-callback`) for mobile.
 
 5. **`drive.file` scope.** Most restrictive — plugin can only access files it created. **Important limitation:** files manually uploaded to GDrive via web UI or other apps are invisible to the plugin. Must be disclosed prominently in setup wizard and settings.
 
@@ -184,7 +184,7 @@ REMOTE  = current GDrive file
 **Desktop (macOS, Windows, Linux):**
 1. Open browser → Google OAuth consent screen
 2. User grants `drive.file` access
-3. Redirect to `localhost:PORT` with auth code (PKCE)
+3. Redirect to `localhost:PORT` with auth code
 4. Exchange code for refresh + access tokens
 5. Store **refresh token only** in plugin settings
 
@@ -512,7 +512,7 @@ src/
   types.ts                       # SyncRecord, ConflictInfo, SyncEvent, ActivityLogEntry types
 
   auth/
-    GoogleAuthManager.ts         # OAuth2 + PKCE flow, token storage, proactive refresh
+    GoogleAuthManager.ts         # OAuth2 flow, token storage, proactive refresh
     OAuthCallbackServer.ts       # Localhost HTTP server for desktop OAuth callback
 
   sync/
@@ -577,7 +577,7 @@ Current `package.json` has `"name": "obsidian-sample-plugin"` — must be rename
 ### Phase 1 — Foundation + Auth (MVP-0)
 - Project setup (rename, tsconfig fix, add diff-match-patch)
 - Types and settings schema
-- Google OAuth 2.0 + PKCE authentication
+- Google OAuth 2.0 authentication
 - Setup wizard (steps 1-2: auth + folder selection)
 - Basic DriveClient (upload, download, list, delete)
 

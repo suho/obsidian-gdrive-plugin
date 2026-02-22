@@ -48,7 +48,6 @@ export interface GDrivePluginSettings {
 	lastSyncPageToken: string;     // GDrive Changes API incremental token
 	deviceId: string;              // UUID generated on first run, identifies this device
 	pendingOAuthState: string;     // mobile OAuth callback CSRF state
-	pendingCodeVerifier: string;   // mobile OAuth PKCE verifier
 }
 
 export const DEFAULT_SETTINGS: GDrivePluginSettings = {
@@ -97,7 +96,6 @@ export const DEFAULT_SETTINGS: GDrivePluginSettings = {
 	lastSyncPageToken: '',
 	deviceId: '',
 	pendingOAuthState: '',
-	pendingCodeVerifier: '',
 };
 
 export class GDriveSettingTab extends PluginSettingTab {

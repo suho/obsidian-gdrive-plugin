@@ -21,9 +21,9 @@
 - [x] Define `DEFAULT_SETTINGS` with correct defaults (auto-sync on, pull 30s, quiescence 2s, etc.)
 - [x] Add platform detection helper to set `wifiOnlySync` default based on mobile vs desktop
 
-### 1.3 Google OAuth 2.0 + PKCE
+### 1.3 Google OAuth 2.0
 - [x] Create `src/auth/GoogleAuthManager.ts` — OAuth2 flow orchestrator
-- [x] Implement PKCE code verifier + challenge generation (using Web Crypto API)
+- [x] Implement OAuth 2.0 authorization code exchange with client credentials
 - [x] Implement desktop auth flow: open browser → localhost redirect → exchange code for tokens
 - [x] Create `src/auth/OAuthCallbackServer.ts` — temporary localhost HTTP server for OAuth callback (desktop only)
 - [x] Implement mobile auth flow: system browser → `obsidian://gdrive-callback` URI scheme → exchange code
