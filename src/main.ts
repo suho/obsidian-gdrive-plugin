@@ -179,6 +179,14 @@ export default class GDriveSyncPlugin extends Plugin {
 				this.openPluginSettings();
 			},
 		});
+
+		this.addCommand({
+			id: 'clean-duplicate-artifacts',
+			name: 'Clean duplicate sync artifacts',
+			callback: () => {
+				this.cleanDuplicateArtifacts();
+			},
+		});
 	}
 
 	private registerFileMenuEntry(): void {
@@ -419,6 +427,70 @@ export default class GDriveSyncPlugin extends Plugin {
 			await this.syncManager.resetSyncStateArtifacts();
 			new Notice('Sync state was reset. Running a fresh sync comparison.');
 			void this.syncNow();
+		})();
+	}
+
+	cleanDuplicateArtifacts(): void {
+		void (async () => {
+			const confirmed = await ConfirmModal.ask(this.app, {
+				title: 'Clean duplicate sync artifacts',
+				message:
+					'This will remove duplicate and generated artifact files (.remote, .sync-conflict) on local vault and Google Drive. Continue?',
+				confirmText: 'Clean artifacts',
+				cancelText: 'Cancel',
+				warning: true,
+			});
+			if (!confirmed) {
+				return;
+			}
+
+			let cancelled = false;
+			const progress = new ProgressModal(this.app, {
+				title: 'Cleaning duplicate artifacts',
+				total: 5,
+				onCancel: () => {
+					cancelled = true;
+				},
+			});
+			let currentStep = 0;
+			progress.open();
+			progress.updateProgress(0, 'Preparing cleanup...');
+			try {
+				const result = await this.syncManager.cleanDuplicateArtifacts({
+					progress: (message) => {
+						currentStep = Math.min(currentStep + 1, 5);
+						progress.updateProgress(currentStep, message);
+					},
+					shouldCancel: () => cancelled,
+				});
+				progress.updateProgress(5, 'Finalizing');
+				progress.finish();
+				if (!result) {
+					new Notice('Cleanup could not start because sync is busy.');
+					return;
+				}
+				const total =
+					result.localRemoved +
+					result.localRenamed +
+					result.localMerged +
+					result.remoteTrashed +
+					result.remoteRenamed +
+					result.remoteMerged;
+				if (total === 0) {
+					new Notice('Cleanup complete. No duplicate artifacts found.');
+					return;
+				}
+				new Notice(
+					`Cleanup complete. Local removed ${result.localRemoved}, local renamed ${result.localRenamed}, local merged ${result.localMerged}, remote trashed ${result.remoteTrashed}, remote renamed ${result.remoteRenamed}, remote merged ${result.remoteMerged}.`
+				);
+			} catch (err) {
+				progress.finish();
+				if (cancelled) {
+					new Notice('Cleanup cancelled.');
+					return;
+				}
+				new Notice(`Cleanup failed: ${err instanceof Error ? err.message : String(err)}`, 12000);
+			}
 		})();
 	}
 }

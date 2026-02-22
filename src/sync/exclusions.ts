@@ -1,4 +1,5 @@
 import type { GDrivePluginSettings } from '../settings';
+import { isGeneratedArtifactPath } from './generatedArtifacts';
 
 export type FileCategory = 'image' | 'audio' | 'video' | 'pdf' | 'other';
 
@@ -69,6 +70,8 @@ export function isHardExcluded(path: string, configDir: string): boolean {
 	const lower = normalized.toLowerCase();
 	const normalizedConfigDir = normalizePrefix(configDir);
 	const configDirLower = normalizedConfigDir.toLowerCase();
+
+	if (isGeneratedArtifactPath(normalized)) return true;
 
 	if (lower === '.ds_store' || lower.endsWith('/.ds_store')) return true;
 	if (lower === 'thumbs.db' || lower.endsWith('/thumbs.db')) return true;
