@@ -1,7 +1,7 @@
 import { normalizePath } from 'obsidian';
 import type GDriveSyncPlugin from '../main';
 import type { DriveClient } from '../gdrive/DriveClient';
-import type { SyncRecord } from '../types';
+import type { DriveFileMetadata, SyncRecord } from '../types';
 import { computeContentHash } from '../utils/checksums';
 import { runWithConcurrencyLimit } from '../utils/concurrency';
 import { isExcluded } from './exclusions';
@@ -42,6 +42,11 @@ export interface UploadSummary {
 interface LocalFileState {
 	path: string;
 	hash: string;
+}
+
+interface ExistingRemoteFileMatch {
+	file: DriveFileMetadata;
+	matchesLocalHash: boolean;
 }
 
 type SyncOperation =
@@ -245,16 +250,33 @@ export class UploadManager {
 	private async pushNewFile(path: string, localHash: string): Promise<void> {
 		const content = await this.plugin.app.vault.adapter.readBinary(path);
 		const { parentId, fileName } = await this.resolveRemoteParent(path);
-		const metadata = await this.driveClient.createFile(
-			fileName,
-			content,
-			this.getMimeType(path),
-			parentId,
-			this.shouldKeepRevisions(path)
-		);
+		const existingRemote = await this.resolveExistingRemoteFileMatch(parentId, fileName, localHash);
+		const mimeType = this.getMimeType(path);
+
+		let gDriveFileId: string;
+		if (existingRemote) {
+			gDriveFileId = existingRemote.file.id;
+			if (!existingRemote.matchesLocalHash) {
+				await this.driveClient.updateFile(
+					existingRemote.file.id,
+					content,
+					mimeType,
+					this.shouldKeepRevisions(path)
+				);
+			}
+		} else {
+			const metadata = await this.driveClient.createFile(
+				fileName,
+				content,
+				mimeType,
+				parentId,
+				this.shouldKeepRevisions(path)
+			);
+			gDriveFileId = metadata.id;
+		}
 
 		this.syncDb.setRecord(path, {
-			gDriveFileId: metadata.id,
+			gDriveFileId,
 			localPath: path,
 			localHash,
 			remoteHash: localHash,
@@ -341,6 +363,29 @@ export class UploadManager {
 		}
 
 		return { parentId, fileName };
+	}
+
+	private async resolveExistingRemoteFileMatch(
+		parentId: string,
+		fileName: string,
+		localHash: string
+	): Promise<ExistingRemoteFileMatch | null> {
+		const candidates = await this.driveClient.findFilesInParentByName(fileName, parentId);
+		if (candidates.length === 0) {
+			return null;
+		}
+		const canonical = candidates[0]!;
+		const remoteHash = await this.computeRemoteHash(canonical.id);
+
+		return {
+			file: canonical,
+			matchesLocalHash: remoteHash === localHash,
+		};
+	}
+
+	private async computeRemoteHash(fileId: string): Promise<string> {
+		const remoteContent = await this.driveClient.downloadFile(fileId);
+		return computeContentHash(remoteContent);
 	}
 
 	private fileName(path: string): string {

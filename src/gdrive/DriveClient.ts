@@ -32,6 +32,11 @@ function parseGoogleError(body: string): ParsedGoogleError {
 	return { reason, message };
 }
 
+function parseModifiedTime(value: string): number {
+	const parsed = Date.parse(value);
+	return Number.isFinite(parsed) ? parsed : 0;
+}
+
 function isRetryableRateLimitError(status: number, reason: string | undefined): boolean {
 	if (status === 429) {
 		return true;
@@ -303,6 +308,46 @@ export class DriveClient {
 		this.assertOk(response.status, response.text);
 		const files = (response.json as { files: { id: string }[] }).files;
 		return files[0]?.id ?? null;
+	}
+
+	/**
+	 * Find non-folder files with an exact name under a parent folder.
+	 * Results are sorted newest-first so all devices select the same canonical entry.
+	 */
+	async findFilesInParentByName(name: string, parentId: string): Promise<DriveFileMetadata[]> {
+		const files: DriveFileMetadata[] = [];
+		let pageToken: string | undefined;
+		const escapedName = name.replace(/'/g, "\\'");
+		const q = `name='${escapedName}' and '${parentId}' in parents and mimeType!='application/vnd.google-apps.folder' and trashed=false`;
+
+		do {
+			const params = new URLSearchParams({
+				q,
+				fields: `nextPageToken,files(${FILE_FIELDS})`,
+				pageSize: '1000',
+			});
+			if (pageToken) {
+				params.set('pageToken', pageToken);
+			}
+
+			const response = await this.requestWithAuth(token => ({
+				url: `${API_BASE}/files?${params.toString()}`,
+				headers: { Authorization: `Bearer ${token}` },
+			}));
+			this.assertOk(response.status, response.text);
+
+			const data = response.json as { files: DriveFileMetadata[]; nextPageToken?: string };
+			files.push(...data.files);
+			pageToken = data.nextPageToken;
+		} while (pageToken);
+
+		return files.sort((a, b) => {
+			const modifiedDelta = parseModifiedTime(b.modifiedTime) - parseModifiedTime(a.modifiedTime);
+			if (modifiedDelta !== 0) {
+				return modifiedDelta;
+			}
+			return a.id.localeCompare(b.id);
+		});
 	}
 
 	// ── File listing ──────────────────────────────────────────────────
