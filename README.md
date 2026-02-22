@@ -28,6 +28,16 @@ Sync your Obsidian vault with Google Drive using OAuth 2.0, with incremental pul
 - Refresh token is stored in plugin data and used only for Google API access.
 - Sync is scoped to the selected Google Drive folder and enabled file types.
 
+## Developer policy disclosures
+
+- External service dependency: Google Drive API and Google OAuth endpoints are required for sync and authentication.
+- Account requirement: A Google account and user-provided OAuth client credentials are required.
+- Data sent to Google: OAuth tokens, folder/file metadata, and file contents for files selected by sync settings.
+- Local data storage: plugin settings, sync database, queue state, and snapshots are stored under `.obsidian/plugins/gdrive-sync/` in the current vault.
+- File access scope: reads and writes only inside the active vault (including selected `.obsidian` config files).
+- Telemetry/ads/payments: no analytics telemetry, no ads, and no paywall features.
+- Remote code execution: the plugin does not download or execute remote scripts and does not self-update outside normal releases.
+
 ## Installation
 
 ### Option 1: BRAT (beta path)

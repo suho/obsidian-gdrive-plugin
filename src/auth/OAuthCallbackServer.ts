@@ -6,6 +6,15 @@ interface CallbackResult {
 	state: string;
 }
 
+function escapeHtml(value: string): string {
+	return value
+		.replace(/&/g, '&amp;')
+		.replace(/</g, '&lt;')
+		.replace(/>/g, '&gt;')
+		.replace(/"/g, '&quot;')
+		.replace(/'/g, '&#39;');
+}
+
 /**
  * Temporary localhost HTTP server that receives the OAuth redirect on desktop.
  * Opens on a random available port, waits for one request, then closes.
@@ -44,38 +53,46 @@ export class OAuthCallbackServer {
 				reject(new Error('OAuth callback timed out after 5 minutes'));
 			}, 5 * 60 * 1000);
 
-			this.server.on('request', (req, res) => {
-				clearTimeout(timeout);
-
+			const requestHandler = (req: http.IncomingMessage, res: http.ServerResponse) => {
 				const url = new URL(req.url ?? '/', `http://127.0.0.1:${this.port}`);
+				if (req.method !== 'GET' || url.pathname !== '/callback') {
+					res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+					res.end('Not found');
+					return;
+				}
+
+				clearTimeout(timeout);
+				this.server?.off('request', requestHandler);
+
 				const code = url.searchParams.get('code');
 				const state = url.searchParams.get('state');
 				const error = url.searchParams.get('error');
-
 				const html = (message: string, success: boolean) => `
 					<!DOCTYPE html>
 					<html>
 					<head><title>Google Drive Sync</title></head>
 					<body style="font-family:sans-serif;text-align:center;padding:40px;">
-						<h2>${success ? '✓' : '✗'} ${message}</h2>
+						<h2>${success ? '✓' : '✗'} ${escapeHtml(message)}</h2>
 						<p>You can close this window and return to Obsidian.</p>
 					</body>
 					</html>
 				`;
 
 				if (error || !code || !state) {
-					res.writeHead(400, { 'Content-Type': 'text/html' });
+					res.writeHead(400, { 'Content-Type': 'text/html; charset=utf-8' });
 					res.end(html(`Authentication failed: ${error ?? 'missing parameters'}`, false));
 					this.close();
 					reject(new Error(error ?? 'OAuth callback missing code or state'));
 					return;
 				}
 
-				res.writeHead(200, { 'Content-Type': 'text/html' });
+				res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
 				res.end(html('Authentication successful', true));
 				this.close();
 				resolve({ code, state });
-			});
+			};
+
+			this.server.on('request', requestHandler);
 		});
 	}
 
