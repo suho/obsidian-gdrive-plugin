@@ -44,7 +44,7 @@ on:
 
 jobs:
     release-from-tag:
-        if: ${{ github.event_name == 'push' }}
+        if: ${{ github.ref_type == 'tag' }}
         runs-on: ubuntu-latest
         permissions:
             contents: write
@@ -65,6 +65,10 @@ jobs:
               run: |
                   npm run lint
                   npm run build
+
+            - name: Validate version files are consistent
+              run: |
+                  node -e 'const fs=require("fs"); const read=(f)=>JSON.parse(fs.readFileSync(f,"utf8")); const semver=/^\d+\.\d+\.\d+$/; const versions=[["package.json",read("package.json").version],["manifest.json",read("manifest.json").version],["manifest-beta.json",read("manifest-beta.json").version]]; for (const [name,version] of versions) { if (!semver.test(String(version ?? ""))) { throw new Error(`${name} has invalid version "${version}". Expected x.y.z`); } } const base=String(versions[1][1]); const mismatches=versions.filter(([_,version])=>String(version)!==base); if (mismatches.length>0) { throw new Error(`Version mismatch: ${versions.map(([name,version])=>`${name}=${version}`).join(", ")}`); }'
 
             - name: Validate tag matches manifest version
               run: |
@@ -82,7 +86,7 @@ jobs:
                       versions.json
 
     release-from-call:
-        if: ${{ github.event_name == 'workflow_call' }}
+        if: ${{ github.ref_type != 'tag' }}
         runs-on: ubuntu-latest
         permissions:
             contents: write
@@ -103,6 +107,10 @@ jobs:
               run: |
                   npm run lint
                   npm run build
+
+            - name: Validate version files are consistent
+              run: |
+                  node -e 'const fs=require("fs"); const read=(f)=>JSON.parse(fs.readFileSync(f,"utf8")); const semver=/^\d+\.\d+\.\d+$/; const versions=[["package.json",read("package.json").version],["manifest.json",read("manifest.json").version],["manifest-beta.json",read("manifest-beta.json").version]]; for (const [name,version] of versions) { if (!semver.test(String(version ?? ""))) { throw new Error(`${name} has invalid version "${version}". Expected x.y.z`); } } const base=String(versions[1][1]); const mismatches=versions.filter(([_,version])=>String(version)!==base); if (mismatches.length>0) { throw new Error(`Version mismatch: ${versions.map(([name,version])=>`${name}=${version}`).join(", ")}`); }'
 
             - name: Validate tag matches manifest version
               if: ${{ inputs.verify_manifest_tag }}
