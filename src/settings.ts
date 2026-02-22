@@ -112,8 +112,8 @@ export class GDriveSettingTab extends PluginSettingTab {
 		const { containerEl } = this;
 		containerEl.empty();
 
-		// ── Account ──────────────────────────────────────────────────
-		new Setting(containerEl).setName('Account').setHeading();
+		// ── Project credentials ───────────────────────────────────────
+		new Setting(containerEl).setName('Project credentials').setHeading();
 
 		new Setting(containerEl)
 			.setName('Client ID')
@@ -142,11 +142,32 @@ export class GDriveSettingTab extends PluginSettingTab {
 					});
 			});
 
+		new Setting(containerEl)
+			.setName('Refresh token')
+			.setDesc(
+				Platform.isMobile
+					? 'Paste or update the refresh token for this device. Changes are saved automatically.'
+					: 'Refresh token for this device. Use connect to Google Drive to set or replace this token.'
+			)
+			.addText(text => {
+				text.setPlaceholder('Paste refresh token').setValue(this.plugin.settings.refreshToken);
+				if (!Platform.isMobile) {
+					text.inputEl.readOnly = true;
+				}
+				text.onChange(async value => {
+					if (!Platform.isMobile) {
+						return;
+					}
+					this.plugin.settings.refreshToken = value.trim();
+					await this.plugin.saveSettings();
+				});
+			});
+
 		if (this.plugin.settings.needsReauthentication) {
 			if (Platform.isMobile) {
 				new Setting(containerEl)
 					.setName('Re-authentication required')
-					.setDesc('Google account access expired. Paste a new refresh token below to resume sync.');
+					.setDesc('Google account access expired. Update the refresh token above to resume sync.');
 			} else {
 				new Setting(containerEl)
 					.setName('Re-authentication required')
@@ -161,6 +182,9 @@ export class GDriveSettingTab extends PluginSettingTab {
 					);
 			}
 		}
+
+		// ── Account ──────────────────────────────────────────────────
+		new Setting(containerEl).setName('Account').setHeading();
 
 		const isConnected = !!this.plugin.settings.refreshToken;
 		const vaultFolderPath = this.plugin.settings.setupComplete && this.plugin.settings.gDriveFolderName
@@ -199,21 +223,6 @@ export class GDriveSettingTab extends PluginSettingTab {
 							this.plugin.openSetupWizard();
 						})
 				);
-
-			new Setting(containerEl)
-				.setName('Refresh token')
-				.setDesc('Copy this token to connect mobile devices without browser sign-in.')
-				.addText(text => {
-					text.setValue(this.plugin.settings.refreshToken);
-					text.inputEl.readOnly = true;
-				})
-				.addButton(btn =>
-					btn.setButtonText('Copy').onClick(() => {
-						void (async () => {
-							await this.copyToClipboard(this.plugin.settings.refreshToken);
-						})();
-					})
-				);
 		} else {
 			if (Platform.isMobile) {
 				new Setting(containerEl)
@@ -238,60 +247,7 @@ export class GDriveSettingTab extends PluginSettingTab {
 			}
 		}
 
-		if (Platform.isMobile) {
-			let importedRefreshToken = '';
-			new Setting(containerEl)
-				.setName(isConnected ? 'Replace refresh token' : 'Add refresh token')
-				.setDesc(
-					isConnected
-						? 'Paste a new refresh token to replace the current one on this device.'
-						: 'Paste a refresh token copied from your desktop app.'
-				)
-				.addText(text => {
-					text
-						.setPlaceholder('Paste refresh token')
-						.setValue('')
-						.onChange(value => {
-							importedRefreshToken = value;
-						});
-				})
-				.addButton(btn =>
-					btn
-						.setButtonText(isConnected ? 'Update token' : 'Connect')
-						.setCta()
-						.onClick(() => {
-							void (async () => {
-								const token = importedRefreshToken.trim();
-								if (!token) {
-									new Notice('Paste a refresh token first.');
-									return;
-								}
-
-								btn.setDisabled(true);
-								btn.setButtonText(isConnected ? 'Updating...' : 'Connecting...');
-
-								try {
-									await this.plugin.authManager.importRefreshToken(token);
-									const needsFolderSetup = !this.plugin.settings.setupComplete;
-									const connectedEmail = this.plugin.settings.connectedEmail;
-									new Notice(connectedEmail ? `Connected as ${connectedEmail}` : 'Google account connected.');
-									this.display();
-									if (needsFolderSetup) {
-										this.plugin.openSetupWizard();
-									}
-								} catch (err) {
-									btn.setDisabled(false);
-									btn.setButtonText(isConnected ? 'Update token' : 'Connect');
-									new Notice(`Failed to connect: ${err instanceof Error ? err.message : String(err)}`, 10000);
-								}
-							})();
-						})
-				);
-		}
-
-		if (isConnected) {
-			this.renderStorageUsage(containerEl);
-		}
+		this.renderUsageMetrics(containerEl, isConnected);
 
 		// ── Sync behavior ─────────────────────────────────────────────
 		new Setting(containerEl).setName('Sync behavior').setHeading();
@@ -667,30 +623,47 @@ export class GDriveSettingTab extends PluginSettingTab {
 		}
 	}
 
-	private renderStorageUsage(containerEl: HTMLElement): void {
-		const descEl = containerEl.createDiv({ text: 'Storage usage: loading...' });
-		descEl.addClass('gdrive-sync-storage-usage');
-		const rateEl = containerEl.createDiv({ text: 'API usage estimate: loading...' });
-		rateEl.addClass('gdrive-sync-storage-usage');
+	private renderUsageMetrics(containerEl: HTMLElement, isConnected: boolean): void {
+		const storageSetting = new Setting(containerEl).setName('Storage usage');
+		const apiSetting = new Setting(containerEl).setName('API usage');
+
+		if (!isConnected) {
+			storageSetting.setDesc('Unavailable until connected.');
+			apiSetting.setDesc('Unavailable until connected.');
+			return;
+		}
+
+		storageSetting.setDesc('Loading...');
+		apiSetting.setDesc('Loading...');
+
 		const snapshot = this.plugin.driveClient.getRateLimitSnapshot();
+		const dailyBudget = snapshot.estimatedDailyQuota;
+		const usagePercent = dailyBudget > 0
+			? Math.min(100, (snapshot.requestsToday / dailyBudget) * 100).toFixed(1)
+			: '0.0';
+		const projectedPercent = dailyBudget > 0
+			? Math.min(100, (snapshot.projectedRequestsToday / dailyBudget) * 100).toFixed(1)
+			: '0.0';
 		const resetAt = new Date(snapshot.resetAtUtcMs).toUTCString();
-		rateEl.setText(
-			`API usage estimate: ${snapshot.requestsToday} requests today, projected ${snapshot.projectedRequestsToday} by ${resetAt}.`
+
+		apiSetting.setDesc(
+			`${snapshot.requestsToday} requests today (${usagePercent}%), projected ${snapshot.projectedRequestsToday} (${projectedPercent}%) by ${resetAt}.`
 		);
 		if (snapshot.shouldWarn) {
-			rateEl.addClass('gdrive-sync-error');
-			rateEl.setText(
-				`API usage estimate: ${snapshot.projectedRequestsToday} projected requests may exceed the daily budget of ${snapshot.estimatedDailyQuota}.`
-			);
+			apiSetting.descEl.addClass('gdrive-sync-error');
 		}
+
 		void (async () => {
 			try {
 				const quota = await this.plugin.driveClient.getStorageQuota();
 				const usedMb = quota.used / (1024 * 1024);
 				const limitMb = quota.limit / (1024 * 1024);
-				descEl.setText(`Storage usage: ${usedMb.toFixed(1)} MB of ${limitMb.toFixed(1)} MB`);
+				const usedPercent = quota.limit > 0
+					? Math.min(100, (quota.used / quota.limit) * 100).toFixed(1)
+					: '0.0';
+				storageSetting.setDesc(`${usedMb.toFixed(1)} MB of ${limitMb.toFixed(1)} MB (${usedPercent}%).`);
 			} catch {
-				descEl.setText('Storage usage: unavailable');
+				storageSetting.setDesc('Unavailable.');
 			}
 		})();
 	}
@@ -727,17 +700,4 @@ export class GDriveSettingTab extends PluginSettingTab {
 		}
 	}
 
-	private async copyToClipboard(value: string): Promise<void> {
-		if (!value) {
-			new Notice('No refresh token available.');
-			return;
-		}
-
-		try {
-			await navigator.clipboard.writeText(value);
-			new Notice('Refresh token copied.');
-		} catch {
-			new Notice('Copy failed. Select the token and copy it manually.');
-		}
-	}
 }
