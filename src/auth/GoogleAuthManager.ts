@@ -463,7 +463,7 @@ export class GoogleAuthManager {
 					await this.refreshAccessToken();
 				} catch (err) {
 					if (err instanceof AuthError) {
-						new Notice(`Google Drive Sync: ${err.message}`, 10000);
+						new Notice(`GDrive Sync: ${err.message}`, 10000);
 					}
 				}
 			})();
@@ -484,7 +484,7 @@ export class GoogleAuthManager {
 			await this.refreshAccessToken();
 		} catch (err) {
 			if (err instanceof AuthError) {
-				new Notice(`Google Drive Sync: ${err.message}`, 10000);
+				new Notice(`GDrive Sync: ${err.message}`, 10000);
 			}
 		}
 	}

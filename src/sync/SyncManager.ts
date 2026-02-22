@@ -390,7 +390,7 @@ export class SyncManager {
 
 		if (this.plugin.settings.syncPaused) {
 			this.statusBar.setPaused();
-			new Notice('Google Drive sync is paused.');
+			new Notice('Sync is paused.');
 			return null;
 		}
 
@@ -484,10 +484,10 @@ export class SyncManager {
 				return null;
 			}
 			const message = err instanceof Error ? err.message : String(err);
-			console.error('Google Drive sync failed', err);
+			console.error('GDrive sync failed', err);
 			this.statusBar.setError(message);
 			this.logError('', message);
-			new Notice(`Google Drive sync failed: ${message}`);
+			new Notice(`Sync failed: ${message}`);
 			return null;
 		} finally {
 			this.syncLock = false;
@@ -505,7 +505,7 @@ export class SyncManager {
 
 		if (this.plugin.settings.syncPaused) {
 			this.statusBar.setPaused();
-			new Notice('Google Drive sync is paused.');
+			new Notice('Sync is paused.');
 			return null;
 		}
 
@@ -576,7 +576,7 @@ export class SyncManager {
 
 		if (this.plugin.settings.syncPaused) {
 			this.statusBar.setPaused();
-			new Notice('Google Drive sync is paused.');
+			new Notice('Sync is paused.');
 			return null;
 		}
 

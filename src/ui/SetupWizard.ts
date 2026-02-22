@@ -137,7 +137,7 @@ export class SetupWizard extends Modal {
 		this.step = this.plugin.authManager.isAuthenticated ? 'folder' : 'authenticate';
 		this.oauthClientIdInput = this.plugin.settings.oauthClientId;
 		this.oauthClientSecretInput = this.plugin.settings.oauthClientSecret;
-		this.titleEl.setText('Set up Google Drive sync');
+		this.titleEl.setText('Set up sync with Google Drive');
 		this.renderStep();
 	}
 
@@ -181,7 +181,7 @@ export class SetupWizard extends Modal {
 			);
 		} else {
 			desc.setText(
-				'Google Drive Sync will upload your vault files to Google Drive. ' +
+				'This plugin will upload your vault files to Google Drive. ' +
 				'Only files created by this plugin are visible because this plugin uses drive.file scope.'
 			);
 

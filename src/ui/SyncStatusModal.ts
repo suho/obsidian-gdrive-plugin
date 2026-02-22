@@ -12,7 +12,7 @@ export class SyncStatusModal extends Modal {
 	}
 
 	onOpen(): void {
-		this.titleEl.setText('Google Drive sync status');
+		this.titleEl.setText('Sync status for Google Drive');
 		this.render();
 	}
 

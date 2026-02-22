@@ -36,7 +36,7 @@ export class LargestFilesModal extends Modal {
 
 	private async load(): Promise<void> {
 		if (!this.plugin.settings.gDriveFolderId) {
-			this.error = 'Set up Google Drive sync first.';
+			this.error = 'Set up sync with Google Drive first.';
 			this.render();
 			return;
 		}

@@ -70,7 +70,7 @@ export class OAuthCallbackServer {
 				const html = (message: string, success: boolean) => `
 					<!DOCTYPE html>
 					<html>
-					<head><title>Google Drive Sync</title></head>
+					<head><title>GDrive Sync</title></head>
 					<body style="font-family:sans-serif;text-align:center;padding:40px;">
 						<h2>${success ? '✓' : '✗'} ${escapeHtml(message)}</h2>
 						<p>You can close this window and return to Obsidian.</p>

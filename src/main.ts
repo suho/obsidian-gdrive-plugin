@@ -144,7 +144,7 @@ export default class GDriveSyncPlugin extends Plugin {
 			callback: () => {
 				void (async () => {
 					await this.syncManager.pauseSync();
-					new Notice('Google Drive sync paused.');
+					new Notice('Sync paused.');
 				})();
 			},
 		});
@@ -155,7 +155,7 @@ export default class GDriveSyncPlugin extends Plugin {
 			callback: () => {
 				void (async () => {
 					await this.syncManager.resumeSync();
-					new Notice('Google Drive sync resumed.');
+					new Notice('Sync resumed.');
 					void this.syncNow();
 				})();
 			},
@@ -264,12 +264,12 @@ export default class GDriveSyncPlugin extends Plugin {
 
 		const total = result.pulled + result.created + result.updated + result.renamed + result.deleted;
 		if (total === 0) {
-			new Notice('Google Drive sync complete. No changes found.');
+			new Notice('Sync complete. No changes found.');
 			return;
 		}
 
 		new Notice(
-			`Google Drive sync complete. Pulled ${result.pulled}, created ${result.created}, updated ${result.updated}, renamed ${result.renamed}, deleted ${result.deleted}.`
+			`Sync complete. Pulled ${result.pulled}, created ${result.created}, updated ${result.updated}, renamed ${result.renamed}, deleted ${result.deleted}.`
 		);
 	}
 

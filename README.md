@@ -1,4 +1,4 @@
-# Google Drive Sync for Obsidian
+# GDrive Sync for Obsidian
 
 Sync your Obsidian vault with Google Drive using OAuth 2.0, with incremental pull/push, conflict handling, selective sync, and offline recovery.
 
@@ -45,7 +45,7 @@ Sync your Obsidian vault with Google Drive using OAuth 2.0, with incremental pul
 1. Install BRAT in Obsidian desktop.
 2. Select **Add beta plugin** in BRAT.
 3. Use repository `suho/obsidian-gdrive-plugin`.
-4. Install **Google Drive Sync**.
+4. Install **GDrive Sync**.
 
 ### Option 2: Manual install
 
@@ -67,11 +67,11 @@ npm run build
 - `manifest.json`
 - `styles.css`
 
-4. In Obsidian, go to **Settings → Community plugins** and enable **Google Drive Sync**.
+4. In Obsidian, go to **Settings → Community plugins** and enable **GDrive Sync**.
 
 ## Setup guide
 
-1. Open **Settings → Google Drive Sync**.
+1. Open **Settings → GDrive Sync**.
 2. Connect your Google account.
 3. Create or choose a Drive folder for this vault.
 4. Review initial sync summary and conflicts.
