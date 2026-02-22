@@ -376,10 +376,10 @@
 - [ ] Test manual install: copy `main.js` + `manifest.json` + `styles.css` to test vault
 
 ### 6.10 Documentation & Release Prep
-- [ ] Write README.md: features, installation, setup guide, FAQ, known limitations
-- [ ] Document `drive.file` scope limitation prominently
-- [ ] Document that selective sync settings are device-local
-- [ ] Document version history retention differences from Obsidian Sync
-- [ ] Update `manifest.json` version + `versions.json` mapping
-- [ ] Prepare release artifacts: `main.js`, `manifest.json`, `styles.css`
-- [ ] Review against Obsidian plugin guidelines for community submission
+- [x] Write README.md: features, installation, setup guide, FAQ, known limitations
+- [x] Document `drive.file` scope limitation prominently
+- [x] Document that selective sync settings are device-local
+- [x] Document version history retention differences from Obsidian Sync
+- [x] Update `manifest.json` version + `versions.json` mapping
+- [x] Prepare release artifacts: `main.js`, `manifest.json`, `styles.css`
+- [x] Review against Obsidian plugin guidelines for community submission

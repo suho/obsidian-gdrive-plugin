@@ -1,94 +1,131 @@
 # Google Drive Sync for Obsidian
 
-Sync your Obsidian vault with Google Drive using the Google Drive API.
+Sync your Obsidian vault with Google Drive using OAuth 2.0 + PKCE, with incremental pull/push, conflict handling, selective sync, and offline recovery.
 
-## What this plugin does
+> [!IMPORTANT]
+> This plugin uses Google Drive scope `drive.file`.
+> It can only access files created by this plugin (or explicitly opened with this app scope).
+> Files created manually in Drive are not guaranteed to appear in sync results.
 
-- Connects your Google account with OAuth 2.0 (PKCE)
-- Creates or links a vault folder under `My Drive/Obsidian Vaults/...`
-- Syncs changes between local vault files and Google Drive
-- Supports selective sync by file type (images, audio, video, PDF files, other types)
-- Supports granular vault configuration sync for selected `.obsidian` files
-- Supports manual sync, pause sync, and resume sync commands
-- Shows sync status in the status bar
-- Lets you copy a refresh token on desktop and import it on mobile
-- Applies API request throttling and retry backoff for quota/rate errors
-- Pauses uploads when Google Drive storage is full until you explicitly resume
+## Features
 
-## Important limitations
+- OAuth 2.0 authentication with PKCE
+- Setup wizard for account + target folder
+- Incremental pull via Google Drive Changes API
+- Local file watcher with quiescence-based upload
+- Conflict handling for Markdown and binary files
+- Activity log view, deleted files modal, and largest files modal
+- Version history modal backed by Google Drive revisions
+- Selective sync by file type and excluded folders
+- Granular `.obsidian` config sync toggles
+- Offline queue replay on reconnect
+- Rate limiting, quota backoff, and storage-full pause handling
 
-- The plugin uses Google Drive scope `drive.file`.
-- This means it can access only files created by this plugin.
-- Files added manually in Google Drive web/app are not guaranteed to be visible to this plugin.
-- Selective sync settings are device-local and do not sync across devices.
-- The plugin does not sync all files in `.obsidian`; it syncs only enabled vault config files.
-- Version history behavior is different from Obsidian Sync because this plugin relies on Google Drive revisions.
+## Privacy and security
 
-## Install on desktop app
+- No hidden telemetry.
+- Access token is not persisted.
+- Refresh token is stored in plugin data and used only for Google API access.
+- Sync is scoped to the selected Google Drive folder and enabled file types.
 
-### Option 1: BRAT (recommended while in beta)
+## Installation
 
-1. Install and enable the BRAT plugin in Obsidian desktop.
-2. Open BRAT and select **Add beta plugin**.
-3. Enter `suho/obsidian-gdrive-plugin`.
-4. Install `Google Drive Sync` from BRAT.
+### Option 1: BRAT (beta path)
+
+1. Install BRAT in Obsidian desktop.
+2. Select **Add beta plugin** in BRAT.
+3. Use repository `suho/obsidian-gdrive-plugin`.
+4. Install **Google Drive Sync**.
 
 ### Option 2: Manual install
 
-1. Build artifacts:
+1. Build release files:
 
 ```bash
 npm install
 npm run build
 ```
 
-2. Create plugin folder in your vault:
+2. Create plugin folder:
 
 ```text
 <Vault>/.obsidian/plugins/gdrive-sync/
 ```
 
-3. Copy these files to that folder:
+3. Copy release artifacts into that folder:
 - `main.js`
 - `manifest.json`
 - `styles.css`
 
-4. In Obsidian desktop, go to **Settings → Community plugins** and enable **Google Drive Sync**.
+4. In Obsidian, go to **Settings → Community plugins** and enable **Google Drive Sync**.
 
-## Desktop first-time setup
-
-1. Open **Settings → Google Drive Sync**.
-2. Select **Connect to Google Drive**.
-3. Complete Google sign-in in your browser.
-4. Return to Obsidian and finish folder setup.
-5. Run command **Google Drive Sync: Sync now**.
-
-## Copy token on desktop and use it on mobile
-
-Use this when mobile sign-in is inconvenient or when you want to quickly connect additional mobile devices.
-
-### On desktop
+## Setup guide
 
 1. Open **Settings → Google Drive Sync**.
-2. In **Account**, find **Refresh token**.
-3. Select **Copy**.
+2. Connect your Google account.
+3. Create or choose a Drive folder for this vault.
+4. Review initial sync summary and conflicts.
+5. Run **Sync now**.
 
-### On mobile
+### Mobile setup
 
-1. Install the same plugin on mobile (BRAT is the easiest path).
-2. Open **Settings → Google Drive Sync**.
-3. In **Add refresh token**, paste the token copied from desktop.
-4. Select **Connect**.
-5. If prompted, finish folder setup in the wizard.
+Mobile auth uses a refresh-token import flow.
 
-## Commands available now
+1. On desktop, copy the refresh token from plugin settings.
+2. On mobile, paste it into **Add refresh token**.
+3. Complete folder setup if prompted.
+
+## Commands
 
 - `Sync now`
+- `Push changes`
+- `Pull changes`
 - `Pause sync`
 - `Resume sync`
+- `View activity log`
+- `View conflicts`
+- `View deleted files`
+- `View largest synced files`
 - `Open settings`
-- `Connect to Google Drive` (desktop)
 - `Resume uploads after storage warning`
+- `Connect to Google Drive` (desktop only)
+
+## FAQ
+
+### Why do some files in Google Drive not appear in Obsidian sync?
+
+The plugin uses `drive.file`, so it primarily sees files created via this plugin. Manual uploads in Drive may be out of scope.
+
+### Are selective sync settings shared across devices?
+
+No. Selective sync options (file types, excluded folders, max size, and related behavior) are device-local by design.
+
+### Is this the same as Obsidian Sync history?
+
+No. History here is based on Google Drive revisions, not Obsidian Sync snapshots.
+
+- Retention behavior depends on Google Drive revision handling and plugin options.
+- Markdown files can optionally request `keepRevisionForever`, but retention rules are still Google-side.
+- History UX and restore semantics are different from Obsidian Sync's native timeline.
+
+### Does it sync all `.obsidian` files?
+
+No. Only configured categories are synced (for example editor settings, appearance, hotkeys, community plugin list).
+Unsafe and transient files (for example workspace and cache files) are intentionally excluded.
+
+## Known limitations
+
+- `drive.file` scope limits visibility to plugin-managed content.
+- Google API quota limits can temporarily delay sync.
+- Files currently active in the editor may be deferred for safety during pulls.
+- Mobile platforms can suspend background execution, so sync is best-effort when the app is not foregrounded.
+
+## Troubleshooting
+
+- If setup does not start, run **Open settings** and reconnect account.
+- If uploads are paused due to storage full, run **Resume uploads after storage warning** after freeing space.
+- If sync appears stalled, check **View activity log** for conflict/error entries.
+- If the target Drive folder was deleted manually, rerun setup from plugin settings.
 
 ## Development
 
@@ -97,17 +134,15 @@ Use this when mobile sign-in is inconvenient or when you want to quickly connect
 - Node.js 18+
 - npm
 
-### Configure OAuth credentials
+### Local configuration
 
-Create `.env` in the project root:
+Create `.env` at repository root:
 
 ```bash
 GDRIVE_CLIENT_ID=your_google_oauth_client_id
 ```
 
-The build injects this value into `main.js`.
-
-### Run
+### Run in watch mode
 
 ```bash
 npm install
@@ -122,15 +157,28 @@ npm run build
 wc -c main.js
 ```
 
-Target bundle size is under 200 KB.
+Bundle target: under 200 KB.
 
-## Release checklist
+## Release prep
 
-1. Update `manifest.json` version.
-2. Update `versions.json` mapping.
-3. Build production bundle.
-4. Publish a GitHub release tagged exactly as the version (no leading `v`).
-5. Upload `manifest.json`, `manifest-beta.json`, `main.js`, `styles.css`.
+1. Update versions in `manifest.json`, `manifest-beta.json`, and `package.json`.
+2. Run `npm run versions` to add/update the current plugin version mapping in `versions.json`.
+3. Add extra supported plugin versions when needed:
+
+```bash
+npm run versions -- 0.14.1 0.14.2
+```
+
+4. Optional: add a same-minor patch range:
+
+```bash
+npm run versions -- --from 0.15.0 --to 0.15.3
+```
+
+5. Build `main.js`.
+6. Tag a GitHub release exactly as the plugin version (no `v` prefix).
+7. Upload `main.js`, `manifest.json`, and `styles.css` as release assets.
+8. Validate against Obsidian policy/guideline checklist in `docs/community-submission-checklist.md`.
 
 ## License
 
