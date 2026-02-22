@@ -33,11 +33,9 @@ export function isWifiConnection(): boolean | null {
 		return false;
 	}
 
-	const effectiveType = connection.effectiveType?.toLowerCase();
-	if (effectiveType && /(?:^|-)g$/u.test(effectiveType)) {
-		return false;
-	}
-
+	// effectiveType ("4g", "3g", etc.) reports link quality, not transport type.
+	// On some Android WebViews it can be "4g" even while on Wi-Fi, so treating it
+	// as cellular causes false offline decisions for "wireless sync only".
 	return null;
 }
 

@@ -21,6 +21,10 @@ interface PullSummary {
 	processed: number;
 }
 
+interface PullChangesOptions {
+	allowActiveWrite?: boolean;
+}
+
 interface PushSummary {
 	created: number;
 	updated: number;
@@ -418,7 +422,7 @@ export class SyncManager {
 			}
 			checkCancelled();
 			options?.progress?.('Pulling remote changes');
-			const pullSummary = await this.pullChanges();
+			const pullSummary = await this.pullChanges({ allowActiveWrite: true });
 			if (pullSummary.processed > 0) {
 				options?.progress?.('Saving pulled changes');
 				await this.syncDb.save();
@@ -595,7 +599,7 @@ export class SyncManager {
 		this.syncLock = true;
 		this.statusBar.setSyncing();
 		try {
-			const summary = await this.pullChanges();
+			const summary = await this.pullChanges({ allowActiveWrite: true });
 			if (summary.processed > 0) {
 				await this.syncDb.save();
 			}
@@ -1676,7 +1680,7 @@ export class SyncManager {
 		}
 	}
 
-	private async pullChanges(): Promise<PullSummary> {
+	private async pullChanges(options?: PullChangesOptions): Promise<PullSummary> {
 		await this.ensureSyncDbReady();
 		const changes = await this.changeTracker.listChangesSinceLastSync();
 		const deduped = new Map<string, DriveChange>();
@@ -1686,7 +1690,7 @@ export class SyncManager {
 
 		let processed = 0;
 		await runWithConcurrencyLimit([...deduped.values()], TRANSFER_CONCURRENCY, async change => {
-			const result = await this.applyRemoteChange(change);
+			const result = await this.applyRemoteChange(change, options);
 			if (result) {
 				processed += 1;
 			}
@@ -1695,9 +1699,11 @@ export class SyncManager {
 		return { processed };
 	}
 
-	private async applyRemoteChange(change: DriveChange): Promise<boolean> {
+	private async applyRemoteChange(change: DriveChange, options?: PullChangesOptions): Promise<boolean> {
 		const before = this.syncDb.getByGDriveId(change.fileId);
-		const result = await this.downloadManager.applyChange(change);
+		const result = await this.downloadManager.applyChange(change, {
+			allowActiveWrite: options?.allowActiveWrite,
+		});
 		const after = this.syncDb.getByGDriveId(change.fileId);
 
 		if (result === 'pulled') {
@@ -1832,12 +1838,23 @@ export class SyncManager {
 	private async refreshConnectivityState(verifyDriveAccess: boolean): Promise<boolean> {
 		const online = await isOnline({
 			wifiOnly: this.plugin.settings.wifiOnlySync,
-			ping: verifyDriveAccess ? async () => {
-				await this.driveClient.getStartPageToken();
-			} : undefined,
 		});
 
 		this.isNetworkOffline = !online;
+		if (!online) {
+			return false;
+		}
+
+		if (verifyDriveAccess) {
+			try {
+				await this.driveClient.getStartPageToken();
+			} catch (err) {
+				// Reachability checks can fail transiently on mobile WebView.
+				// Continue and let the real sync call surface a concrete API/auth error.
+				console.warn('Drive reachability preflight failed; continuing sync attempt.', err);
+			}
+		}
+
 		return online;
 	}
 
