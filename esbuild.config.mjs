@@ -1,8 +1,6 @@
 import esbuild from "esbuild";
 import process from "process";
-import { existsSync, readFileSync } from 'node:fs';
 import { builtinModules } from 'node:module';
-import { resolve } from 'node:path';
 
 const banner =
 `/*
@@ -13,56 +11,12 @@ if you want to view the source, please visit the github repository of this plugi
 
 const prod = (process.argv[2] === "production");
 
-function loadDotEnv() {
-	const envPath = resolve(process.cwd(), '.env');
-	if (!existsSync(envPath)) {
-		return;
-	}
-
-	const lines = readFileSync(envPath, 'utf8').split(/\r?\n/u);
-	for (const rawLine of lines) {
-		const line = rawLine.trim();
-		if (!line || line.startsWith('#')) {
-			continue;
-		}
-
-		const withoutExport = line.startsWith('export ') ? line.slice(7).trim() : line;
-		const eqIndex = withoutExport.indexOf('=');
-		if (eqIndex <= 0) {
-			continue;
-		}
-
-		const key = withoutExport.slice(0, eqIndex).trim();
-		if (!/^[A-Za-z_][A-Za-z0-9_]*$/u.test(key) || process.env[key] !== undefined) {
-			continue;
-		}
-
-		let value = withoutExport.slice(eqIndex + 1).trim();
-		const isQuoted =
-			(value.startsWith('"') && value.endsWith('"')) ||
-			(value.startsWith("'") && value.endsWith("'"));
-
-		if (isQuoted) {
-			value = value.slice(1, -1);
-		} else {
-			value = value.split(/\s+#/u, 1)[0]?.trim() ?? '';
-		}
-
-		process.env[key] = value;
-	}
-}
-
-loadDotEnv();
-
 const context = await esbuild.context({
 	banner: {
 		js: banner,
 	},
 	entryPoints: ["src/main.ts"],
 	bundle: true,
-	define: {
-		'globalThis.__GDRIVE_CLIENT_ID__': JSON.stringify(process.env.GDRIVE_CLIENT_ID ?? ''),
-	},
 	external: [
 		"obsidian",
 		"electron",

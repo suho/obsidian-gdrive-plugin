@@ -24,11 +24,6 @@ const SESSION_CODE_VERIFIER_KEY = 'gdrive_code_verifier';
 const SESSION_OAUTH_STATE_KEY = 'gdrive_oauth_state';
 
 export class GoogleAuthManager {
-	// Populated by the user via plugin settings — see PLANS.md section 5.1
-	// The plugin must have a Google OAuth 2.0 client ID (registered in GCP Console)
-	// with redirect URIs: http://127.0.0.1 (any port) and obsidian://gdrive-callback
-	private readonly clientId: string;
-
 	// In-memory access token (not persisted — reconstructed from refresh token on load)
 	private accessToken = '';
 	// Refresh timer handle
@@ -43,11 +38,6 @@ export class GoogleAuthManager {
 	constructor(
 		private readonly plugin: GDriveSyncPlugin
 	) {
-		// Client ID is injected at build time via esbuild define.
-		// Set GDRIVE_CLIENT_ID in your build environment.
-		/* eslint-disable @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-explicit-any */
-		this.clientId = ((globalThis as any).__GDRIVE_CLIENT_ID__ as string | undefined) ?? '';
-		/* eslint-enable @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-explicit-any */
 		if (this.plugin.settings.needsReauthentication) {
 			this.showReauthenticateNotice();
 		}
@@ -56,6 +46,16 @@ export class GoogleAuthManager {
 	/** True if we have a refresh token (i.e., the user has authenticated). */
 	get isAuthenticated(): boolean {
 		return !!this.plugin.settings.refreshToken;
+	}
+
+	get hasOAuthClientConfigured(): boolean {
+		return !!this.getClientId();
+	}
+
+	async saveOAuthClientCredentials(clientId: string, clientSecret: string): Promise<void> {
+		this.plugin.settings.oauthClientId = clientId.trim();
+		this.plugin.settings.oauthClientSecret = clientSecret.trim();
+		await this.plugin.saveSettings();
 	}
 
 	/** Returns a valid access token, refreshing if necessary. */
@@ -73,10 +73,10 @@ export class GoogleAuthManager {
 	 * Mobile:  opens system browser → obsidian:// URI scheme
 	 */
 	async authenticate(): Promise<void> {
-		if (!this.clientId) {
+		if (!this.getClientId()) {
 			throw new Error(
 				'Google OAuth client ID is not configured. ' +
-				'Set GDRIVE_CLIENT_ID at build time.'
+				'Open setup and enter OAuth client credentials first.'
 			);
 		}
 
@@ -124,10 +124,10 @@ export class GoogleAuthManager {
 
 	/** Import a refresh token from another device and initialize session state. */
 	async importRefreshToken(refreshToken: string): Promise<void> {
-		if (!this.clientId) {
+		if (!this.getClientId()) {
 			throw new Error(
 				'Google OAuth client ID is not configured. ' +
-				'Set GDRIVE_CLIENT_ID at build time.'
+				'Enter OAuth client credentials in plugin settings first.'
 			);
 		}
 
@@ -256,18 +256,22 @@ export class GoogleAuthManager {
 	// ── Token exchange ────────────────────────────────────────────────
 
 	private async exchangeCode(code: string, codeVerifier: string, redirectUri: string): Promise<void> {
+		const clientId = this.getClientId();
+		const body = new URLSearchParams({
+			code,
+			client_id: clientId,
+			redirect_uri: redirectUri,
+			grant_type: 'authorization_code',
+			code_verifier: codeVerifier,
+		});
+		this.appendClientSecret(body);
+
 		const response = await requestUrl({
 			url: TOKEN_ENDPOINT,
 			method: 'POST',
 			headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
 			throw: false,
-			body: new URLSearchParams({
-				code,
-				client_id: this.clientId,
-				redirect_uri: redirectUri,
-				grant_type: 'authorization_code',
-				code_verifier: codeVerifier,
-			}).toString(),
+			body: body.toString(),
 		});
 
 		if (response.status !== 200) {
@@ -353,16 +357,19 @@ export class GoogleAuthManager {
 	}
 
 	private async requestRefreshGrant(refreshToken: string): Promise<Awaited<ReturnType<typeof requestUrl>>> {
+		const body = new URLSearchParams({
+			grant_type: 'refresh_token',
+			refresh_token: refreshToken,
+			client_id: this.getClientId(),
+		});
+		this.appendClientSecret(body);
+
 		return requestUrl({
 			url: TOKEN_ENDPOINT,
 			method: 'POST',
 			headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
 			throw: false,
-			body: new URLSearchParams({
-				grant_type: 'refresh_token',
-				refresh_token: refreshToken,
-				client_id: this.clientId,
-			}).toString(),
+			body: body.toString(),
 		});
 	}
 
@@ -423,12 +430,27 @@ export class GoogleAuthManager {
 				if (oauthError.error_description?.toLowerCase().includes('client_secret')) {
 					return (
 						'Google reported that a client secret is required. ' +
-						'Switch to a Desktop app OAuth client ID to use PKCE-only login.'
+						'Add OAuth client secret in setup or plugin settings and retry.'
 					);
 				}
 				return '';
 			default:
 				return '';
+		}
+	}
+
+	private getClientId(): string {
+		return this.plugin.settings.oauthClientId.trim();
+	}
+
+	private getClientSecret(): string {
+		return this.plugin.settings.oauthClientSecret.trim();
+	}
+
+	private appendClientSecret(body: URLSearchParams): void {
+		const clientSecret = this.getClientSecret();
+		if (clientSecret) {
+			body.set('client_secret', clientSecret);
 		}
 	}
 
@@ -620,7 +642,7 @@ export class GoogleAuthManager {
 		}
 
 		const params = new URLSearchParams({
-			client_id: this.clientId,
+			client_id: this.getClientId(),
 			redirect_uri: redirectUri,
 			response_type: 'code',
 			scope: SCOPE,

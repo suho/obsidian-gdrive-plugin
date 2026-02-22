@@ -136,6 +136,8 @@ export class SetupWizard extends Modal {
 	private planningError = '';
 	private initialSyncInProgress = false;
 	private initialSyncProgress = '';
+	private oauthClientIdInput = '';
+	private oauthClientSecretInput = '';
 
 	constructor(
 		app: App,
@@ -147,6 +149,8 @@ export class SetupWizard extends Modal {
 
 	onOpen(): void {
 		this.step = this.plugin.authManager.isAuthenticated ? 'folder' : 'authenticate';
+		this.oauthClientIdInput = this.plugin.settings.oauthClientId;
+		this.oauthClientSecretInput = this.plugin.settings.oauthClientSecret;
 		this.titleEl.setText('Set up Google Drive sync');
 		this.renderStep();
 	}
@@ -247,15 +251,52 @@ export class SetupWizard extends Modal {
 			return;
 		}
 
+		this.renderDesktopCredentialGuide();
+
+		new Setting(this.contentEl)
+			.setName('Client ID')
+			.setDesc('Paste your desktop client ID.')
+			.addText(text =>
+				text
+					.setPlaceholder('Paste client ID')
+					.setValue(this.oauthClientIdInput)
+					.onChange(value => {
+						this.oauthClientIdInput = value.trim();
+					})
+			);
+
+		new Setting(this.contentEl)
+			.setName('Client secret')
+			.setDesc('Paste client secret. Some projects require it for token exchange.')
+			.addText(text => {
+				text.inputEl.type = 'password';
+				text
+					.setPlaceholder('Paste client secret')
+					.setValue(this.oauthClientSecretInput)
+					.onChange(value => {
+						this.oauthClientSecretInput = value.trim();
+					});
+			});
+
 		const connectBtn = this.contentEl.createEl('button');
 		connectBtn.addClass('mod-cta');
 		connectBtn.setText('Connect to Google Drive');
 		connectBtn.addEventListener('click', () => {
 			void (async () => {
+				const clientId = this.oauthClientIdInput.trim();
+				const clientSecret = this.oauthClientSecretInput.trim();
+				if (!clientId) {
+					const errorEl = this.contentEl.querySelector('.gdrive-sync-error') ?? this.contentEl.createEl('p');
+					errorEl.addClass('gdrive-sync-error');
+					errorEl.setText('Add client ID first.');
+					return;
+				}
+
 				connectBtn.setAttr('disabled', 'true');
 				connectBtn.setText('Waiting for browser...');
 
 				try {
+					await this.plugin.authManager.saveOAuthClientCredentials(clientId, clientSecret);
 					await this.plugin.authManager.authenticate();
 					this.plugin.refreshSettingTab();
 					const connectedEmail = this.plugin.settings.connectedEmail;
@@ -271,6 +312,29 @@ export class SetupWizard extends Modal {
 				}
 			})();
 		});
+	}
+
+	private renderDesktopCredentialGuide(): void {
+		const guide = this.contentEl.createEl('div');
+		guide.addClass('gdrive-sync-notice');
+		guide.createEl('p').setText('Before connecting, create credentials in cloud console.');
+
+		const steps = guide.createEl('ol');
+		this.addGuideStep(steps, 'Create a project', 'https://console.cloud.google.com/projectcreate');
+		this.addGuideStep(steps, 'Open credentials page', 'https://console.cloud.google.com/apis/credentials');
+		this.addGuideStep(steps, 'Enable Google Drive API', 'https://console.cloud.google.com/apis/api/drive.googleapis.com');
+		this.addGuideStep(steps, 'Set up consent screen', 'https://console.cloud.google.com/auth/branding');
+		this.addGuideStep(steps, 'Add test users if app is in testing', 'https://console.cloud.google.com/auth/audience');
+		this.addGuideStep(steps, 'Create client and choose desktop app', 'https://console.cloud.google.com/auth/clients');
+
+		guide.createEl('p').setText('Copy client ID and client secret, then paste them below.');
+	}
+
+	private addGuideStep(listEl: HTMLOListElement, label: string, href: string): void {
+		const item = listEl.createEl('li');
+		const link = item.createEl('a', { text: label, href });
+		link.setAttr('target', '_blank');
+		link.setAttr('rel', 'noopener noreferrer');
 	}
 
 	private renderFolderStep(): void {

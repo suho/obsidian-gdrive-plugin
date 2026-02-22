@@ -67,6 +67,19 @@ npm run build
 4. Review initial sync summary and conflicts.
 5. Run **Sync now**.
 
+### Create Google OAuth credentials
+
+Before using **Connect to Google Drive**, create a desktop OAuth client in Google Cloud Console:
+
+1. Create a Google Cloud project: [Project create](https://console.cloud.google.com/projectcreate)
+2. Open credentials page: [Credentials](https://console.cloud.google.com/apis/credentials)
+3. Enable API: [Google Drive API](https://console.cloud.google.com/apis/api/drive.googleapis.com)
+4. Configure consent screen: [Branding](https://console.cloud.google.com/auth/branding)
+5. If app is in testing, add your account: [Audience](https://console.cloud.google.com/auth/audience)
+6. Create client: [OAuth clients](https://console.cloud.google.com/auth/clients)
+7. Choose application type: `Desktop app`
+8. Copy `client ID` and `client secret`, then paste them into the setup wizard.
+
 ### Mobile setup
 
 Mobile auth uses a refresh-token import flow.
@@ -136,16 +149,11 @@ Unsafe and transient files (for example workspace and cache files) are intention
 
 ### Local configuration
 
-Create `.env` at repository root:
+Configure OAuth credentials in the setup wizard:
 
-```bash
-GDRIVE_CLIENT_ID=your_google_oauth_client_id
-```
-
-Use a Google OAuth client of type `Desktop app` for this PKCE flow.
-
-- `Web application` clients commonly require `client_secret` at the token endpoint and can fail with HTTP `400`/`401` in this plugin.
-- Desktop login uses a loopback callback: `http://127.0.0.1:<random-port>/callback`.
+- On **Connect to Google Drive**, paste `OAuth client ID` and `OAuth client secret`.
+- Values are saved in plugin settings, so users only enter them once per device.
+- Use a Google OAuth client of type `Desktop app` and loopback callback (`http://127.0.0.1:<random-port>/callback`).
 
 ### Run in watch mode
 

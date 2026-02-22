@@ -4,6 +4,8 @@ import { ExcludedFoldersModal } from './ui/ExcludedFoldersModal';
 
 export interface GDrivePluginSettings {
 	// Authentication (device-local, never synced to GDrive)
+	oauthClientId: string;
+	oauthClientSecret: string;
 	refreshToken: string;
 	tokenExpiry: number;           // Unix ms timestamp of access token expiry
 	connectedEmail: string;
@@ -51,6 +53,8 @@ export interface GDrivePluginSettings {
 
 export const DEFAULT_SETTINGS: GDrivePluginSettings = {
 	// Authentication
+	oauthClientId: '',
+	oauthClientSecret: '',
 	refreshToken: '',
 	tokenExpiry: 0,
 	connectedEmail: '',
@@ -110,6 +114,34 @@ export class GDriveSettingTab extends PluginSettingTab {
 
 		// ── Account ──────────────────────────────────────────────────
 		new Setting(containerEl).setName('Account').setHeading();
+
+		new Setting(containerEl)
+			.setName('Client ID')
+			.setDesc('Google desktop client ID used for token requests.')
+			.addText(text =>
+				text
+					.setPlaceholder('Paste client ID')
+					.setValue(this.plugin.settings.oauthClientId)
+					.onChange(async value => {
+						this.plugin.settings.oauthClientId = value.trim();
+						await this.plugin.saveSettings();
+					})
+			);
+
+		new Setting(containerEl)
+			.setName('Client secret')
+			.setDesc('Client secret used for token requests. Leave empty if your client works without it.')
+			.addText(text => {
+				text.inputEl.type = 'password';
+				text
+					.setPlaceholder('Paste client secret')
+					.setValue(this.plugin.settings.oauthClientSecret)
+					.onChange(async value => {
+						this.plugin.settings.oauthClientSecret = value.trim();
+						await this.plugin.saveSettings();
+					});
+			});
+
 		if (this.plugin.settings.needsReauthentication) {
 			if (Platform.isMobile) {
 				new Setting(containerEl)
