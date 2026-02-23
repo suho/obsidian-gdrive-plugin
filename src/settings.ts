@@ -2,6 +2,35 @@ import { App, Notice, Platform, PluginSettingTab, Setting } from 'obsidian';
 import type GDriveSyncPlugin from './main';
 import { ExcludedFoldersModal } from './ui/ExcludedFoldersModal';
 
+function formatStorageBytes(bytes: number): string {
+	if (!Number.isFinite(bytes) || bytes <= 0) {
+		return '0.0 GB';
+	}
+
+	const gibibytes = bytes / (1024 ** 3);
+	if (gibibytes >= 1024) {
+		return `${(gibibytes / 1024).toFixed(1)} TB`;
+	}
+
+	return `${gibibytes.toFixed(1)} GB`;
+}
+
+function formatPercent(numerator: number, denominator: number): { ratio: number; label: string } {
+	if (!Number.isFinite(numerator) || !Number.isFinite(denominator) || denominator <= 0) {
+		return { ratio: 0, label: '0.0' };
+	}
+
+	const ratio = Math.min(100, Math.max(0, (numerator / denominator) * 100));
+	return { ratio, label: ratio.toFixed(1) };
+}
+
+function formatLocalDateTime(ts: number): string {
+	return new Date(ts).toLocaleString(undefined, {
+		dateStyle: 'medium',
+		timeStyle: 'short',
+	});
+}
+
 export interface GDrivePluginSettings {
 	// Authentication (device-local, never synced to GDrive)
 	oauthClientId: string;
@@ -636,34 +665,47 @@ export class GDriveSettingTab extends PluginSettingTab {
 
 		const snapshot = this.plugin.driveClient.getRateLimitSnapshot();
 		const dailyBudget = snapshot.estimatedDailyQuota;
-		const usagePercent = dailyBudget > 0
-			? Math.min(100, (snapshot.requestsToday / dailyBudget) * 100).toFixed(1)
-			: '0.0';
-		const projectedPercent = dailyBudget > 0
-			? Math.min(100, (snapshot.projectedRequestsToday / dailyBudget) * 100).toFixed(1)
-			: '0.0';
-		const resetAt = new Date(snapshot.resetAtUtcMs).toUTCString();
+		const usagePercent = formatPercent(snapshot.requestsToday, dailyBudget);
+		const projectedPercent = formatPercent(snapshot.projectedRequestsToday, dailyBudget);
+		const resetAt = formatLocalDateTime(snapshot.resetAtUtcMs);
 
 		apiSetting.setDesc(
-			`${snapshot.requestsToday} requests today (${usagePercent}%), projected ${snapshot.projectedRequestsToday} (${projectedPercent}%) by ${resetAt}.`
+			`${snapshot.requestsToday} requests today (${usagePercent.label}%), projected ${snapshot.projectedRequestsToday} (${projectedPercent.label}%) by ${resetAt}.`
+		);
+		const apiProgress = this.addUsageProgress(
+			apiSetting,
+			projectedPercent.ratio,
+			'Projected API usage for today'
 		);
 		if (snapshot.shouldWarn) {
 			apiSetting.descEl.addClass('gdrive-sync-error');
+			apiProgress.addClass('is-warning');
 		}
 
 		void (async () => {
 			try {
 				const quota = await this.plugin.driveClient.getStorageQuota();
-				const usedMb = quota.used / (1024 * 1024);
-				const limitMb = quota.limit / (1024 * 1024);
-				const usedPercent = quota.limit > 0
-					? Math.min(100, (quota.used / quota.limit) * 100).toFixed(1)
-					: '0.0';
-				storageSetting.setDesc(`${usedMb.toFixed(1)} MB of ${limitMb.toFixed(1)} MB (${usedPercent}%).`);
+				const usedPercent = formatPercent(quota.used, quota.limit);
+				if (quota.limit > 0) {
+					storageSetting.setDesc(
+						`${formatStorageBytes(quota.used)} of ${formatStorageBytes(quota.limit)} (${usedPercent.label}%).`
+					);
+					this.addUsageProgress(storageSetting, usedPercent.ratio, 'Storage usage');
+				} else {
+					storageSetting.setDesc(`${formatStorageBytes(quota.used)} used. No storage limit was reported.`);
+				}
 			} catch {
 				storageSetting.setDesc('Unavailable.');
 			}
 		})();
+	}
+
+	private addUsageProgress(setting: Setting, percent: number, label: string): HTMLProgressElement {
+		const progress = setting.descEl.createEl('progress', { cls: 'gdrive-sync-usage-progress' });
+		progress.max = 100;
+		progress.value = Math.max(0, Math.min(100, percent));
+		progress.setAttribute('aria-label', label);
+		return progress;
 	}
 
 	private async updateSelectiveSyncSettings(update: () => void, refreshAfterSave = false): Promise<void> {

@@ -395,6 +395,15 @@ If your plugin does not need CSS, delete this file.
 	color: var(--text-accent);
 }
 
+.gdrive-sync-usage-progress {
+	width: 100%;
+	margin-top: 6px;
+}
+
+.gdrive-sync-usage-progress.is-warning {
+	accent-color: var(--color-red);
+}
+
 @media (max-width: 900px) {
 	.gdrive-sync-conflict-split {
 		grid-template-columns: 1fr;
