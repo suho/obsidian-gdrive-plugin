@@ -180,6 +180,7 @@ export class ActivityLogView extends ItemView {
 
 		if (entry.action === 'deleted' && entry.fileId) {
 			const restoreButton = row.createEl('button', { text: 'Restore from Google Drive', cls: 'gdrive-sync-linkish' });
+			restoreButton.addClass('gdrive-sync-linkish-padded');
 			restoreButton.addEventListener('click', () => {
 				void (async () => {
 					restoreButton.disabled = true;

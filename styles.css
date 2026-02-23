@@ -212,6 +212,10 @@ If your plugin does not need CSS, delete this file.
 	cursor: pointer;
 }
 
+.gdrive-sync-linkish-padded {
+	padding-inline: 8px;
+}
+
 .is-hidden {
 	display: none;
 }
