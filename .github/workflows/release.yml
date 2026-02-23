@@ -41,6 +41,11 @@ on:
                 required: false
                 default: true
                 type: boolean
+            previous_tag_name:
+                description: Optional previous tag used when generating release notes.
+                required: false
+                default: ""
+                type: string
 
 jobs:
     release-from-tag:
@@ -119,13 +124,32 @@ jobs:
               run: |
                   node -e 'const fs=require("fs"); const v=JSON.parse(fs.readFileSync("manifest.json","utf8")).version; const tag=process.env.RELEASE_TAG; if (v !== tag) { throw new Error(`Tag ${tag} does not match manifest version ${v}`); }'
 
+            - name: Generate release notes from explicit previous tag
+              id: explicit-notes
+              if: ${{ inputs.generate_release_notes && inputs.previous_tag_name != '' }}
+              uses: actions/github-script@v7
+              env:
+                  RELEASE_TAG: ${{ inputs.tag_name }}
+                  PREVIOUS_TAG: ${{ inputs.previous_tag_name }}
+              with:
+                  script: |
+                      const { data } = await github.rest.repos.generateReleaseNotes({
+                        owner: context.repo.owner,
+                        repo: context.repo.repo,
+                        tag_name: process.env.RELEASE_TAG,
+                        target_commitish: context.sha,
+                        previous_tag_name: process.env.PREVIOUS_TAG
+                      });
+                      core.setOutput("body", data.body);
+
             - name: Create GitHub release with Obsidian assets
               uses: softprops/action-gh-release@v2
               with:
                   tag_name: ${{ inputs.tag_name }}
                   name: ${{ inputs.release_name || inputs.tag_name }}
                   prerelease: ${{ inputs.prerelease }}
-                  generate_release_notes: ${{ inputs.generate_release_notes }}
+                  generate_release_notes: ${{ inputs.generate_release_notes && inputs.previous_tag_name == '' }}
+                  body: ${{ steps.explicit-notes.outputs.body }}
                   make_latest: ${{ inputs.make_latest }}
                   allow_updates: ${{ inputs.allow_updates }}
                   files: |

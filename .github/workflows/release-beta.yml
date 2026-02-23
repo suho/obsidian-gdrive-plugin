@@ -27,8 +27,38 @@ jobs:
                   git tag -f beta "${GITHUB_SHA}"
                   git push origin refs/tags/beta --force
 
+    resolve-previous-release:
+        runs-on: ubuntu-latest
+        permissions:
+            contents: read
+        outputs:
+            previous_tag_name: ${{ steps.find.outputs.tag }}
+        steps:
+            - name: Find latest non-beta release tag
+              id: find
+              uses: actions/github-script@v7
+              with:
+                  script: |
+                      const { data: releases } = await github.rest.repos.listReleases({
+                        owner: context.repo.owner,
+                        repo: context.repo.repo,
+                        per_page: 100
+                      });
+
+                      const previous = releases.find((release) => {
+                        return !release.draft && release.tag_name !== "beta" && !release.tag_name.startsWith("beta-");
+                      });
+
+                      const tag = previous?.tag_name ?? "";
+                      if (tag) {
+                        core.info(`Using previous release tag: ${tag}`);
+                      } else {
+                        core.info("No previous non-beta release found. Falling back to default generated notes.");
+                      }
+                      core.setOutput("tag", tag);
+
     release-beta:
-        needs: move-beta-tag
+        needs: [move-beta-tag, resolve-previous-release]
         permissions:
             contents: write
         uses: ./.github/workflows/release.yml
@@ -41,3 +71,4 @@ jobs:
             make_latest: false
             allow_updates: true
             verify_manifest_tag: false
+            previous_tag_name: ${{ needs.resolve-previous-release.outputs.previous_tag_name }}
