@@ -26,7 +26,14 @@ Sync your Obsidian vault with Google Drive using OAuth 2.0, with incremental pul
 - No hidden telemetry.
 - Access token is not persisted.
 - Refresh token is stored in plugin data and used only for Google API access.
+- OAuth `client ID` and `client secret` are user-provided Google OAuth credentials.
+- `client ID` and `client secret` are currently stored in plugin settings (device-local) for reuse.
 - Sync is scoped to the selected Google Drive folder and enabled file types.
+
+> [!NOTE]
+> A new **Keychain** settings section for storing plugin secrets is planned.
+> Obsidian Plugin Keychain API support is coming soon.
+> When the API is available, this plugin will move secret storage to Obsidian Keychain.
 
 ## Developer policy disclosures
 
