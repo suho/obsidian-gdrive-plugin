@@ -60,7 +60,7 @@ function actorLabel(revision: DriveRevision): string {
 		return 'Unknown device';
 	}
 	if (actor.me) {
-		return 'This account';
+		return '';
 	}
 	if (actor.displayName) {
 		return actor.displayName;
@@ -78,6 +78,8 @@ export class VersionHistoryModal extends Modal {
 	private loading = false;
 	private error = '';
 	private selectedContentIsText = false;
+	private revisionListScrollTop = 0;
+	private previewScrollTop = 0;
 
 	constructor(
 		app: App,
@@ -143,7 +145,20 @@ export class VersionHistoryModal extends Modal {
 		this.selectedContent = new TextDecoder().decode(bytes);
 	}
 
+	private captureScrollState(): void {
+		const revisionList = this.contentEl.querySelector('.gdrive-sync-history-left');
+		if (revisionList instanceof HTMLElement) {
+			this.revisionListScrollTop = revisionList.scrollTop;
+		}
+
+		const preview = this.contentEl.querySelector('.gdrive-sync-history-preview');
+		if (preview instanceof HTMLElement) {
+			this.previewScrollTop = preview.scrollTop;
+		}
+	}
+
 	private render(): void {
+		this.captureScrollState();
 		this.contentEl.empty();
 		if (this.loading) {
 			this.contentEl.createEl('p', { text: 'Loading revisions...' });
@@ -172,12 +187,16 @@ export class VersionHistoryModal extends Modal {
 				text: new Date(revision.modifiedTime).toLocaleString(),
 				cls: revision.id === this.selectedRevisionId ? 'mod-cta' : '',
 			});
-			item.createDiv({
-				cls: 'gdrive-sync-history-revision-meta',
-				text: actorLabel(revision),
-			});
+			const actor = actorLabel(revision);
+			if (actor.length > 0) {
+				item.createDiv({
+					cls: 'gdrive-sync-history-revision-meta',
+					text: actor,
+				});
+			}
 			button.addEventListener('click', () => {
 				void (async () => {
+					this.captureScrollState();
 					this.selectedRevisionId = revision.id;
 					await this.loadSelectedContent();
 					this.render();
@@ -185,23 +204,35 @@ export class VersionHistoryModal extends Modal {
 			});
 		}
 
+		left.scrollTop = this.revisionListScrollTop;
+		left.addEventListener('scroll', () => {
+			this.revisionListScrollTop = left.scrollTop;
+		});
+
 		right.createEl('p', {
 			cls: 'gdrive-sync-history-preview-meta',
 			text: 'Comparing selected revision with current local file.',
 		});
 
 		const preview = right.createDiv({ cls: 'gdrive-sync-history-preview' });
+		preview.scrollTop = this.previewScrollTop;
+		preview.addEventListener('scroll', () => {
+			this.previewScrollTop = preview.scrollTop;
+		});
 		if (this.selectedContentIsText) {
 			void (async () => {
 				try {
 					const current = await this.plugin.app.vault.adapter.read(this.filePath);
 					renderDiffLines(preview, diffLines(current, this.selectedContent));
+					preview.scrollTop = this.previewScrollTop;
 				} catch {
 					preview.setText(this.selectedContent);
+					preview.scrollTop = this.previewScrollTop;
 				}
 			})();
 		} else {
 			preview.setText(this.selectedContent);
+			preview.scrollTop = this.previewScrollTop;
 		}
 
 		new Setting(this.contentEl)
