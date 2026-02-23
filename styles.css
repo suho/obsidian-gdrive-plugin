@@ -212,7 +212,7 @@ If your plugin does not need CSS, delete this file.
 	cursor: pointer;
 }
 
-.gdrive-sync-linkish-padded {
+.gdrive-sync-activity-entry .gdrive-sync-linkish {
 	padding-inline: 8px;
 }
 
