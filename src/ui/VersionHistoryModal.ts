@@ -2,6 +2,13 @@ import { App, Modal, Notice, Setting } from 'obsidian';
 import type GDriveSyncPlugin from '../main';
 import type { DriveRevision } from '../types';
 
+type DiffLineKind = 'context' | 'removed' | 'added';
+
+interface DiffLine {
+	kind: DiffLineKind;
+	text: string;
+}
+
 function isTextLike(path: string, mimeType: string): boolean {
 	if (mimeType.startsWith('text/')) {
 		return true;
@@ -15,26 +22,36 @@ function isTextLike(path: string, mimeType: string): boolean {
 	);
 }
 
-function diffText(current: string, selected: string): string {
+function diffLines(current: string, selected: string): DiffLine[] {
 	const currentLines = current.split('\n');
 	const selectedLines = selected.split('\n');
 	const max = Math.max(currentLines.length, selectedLines.length);
-	const lines: string[] = [];
+	const lines: DiffLine[] = [];
 	for (let index = 0; index < max; index += 1) {
 		const left = currentLines[index] ?? '';
 		const right = selectedLines[index] ?? '';
 		if (left === right) {
-			lines.push(`  ${right}`);
+			lines.push({ kind: 'context', text: right });
 			continue;
 		}
 		if (left.length > 0) {
-			lines.push(`- ${left}`);
+			lines.push({ kind: 'removed', text: left });
 		}
 		if (right.length > 0) {
-			lines.push(`+ ${right}`);
+			lines.push({ kind: 'added', text: right });
 		}
 	}
-	return lines.join('\n');
+	return lines;
+}
+
+function renderDiffLines(container: HTMLElement, lines: DiffLine[]): void {
+	container.empty();
+	for (const line of lines) {
+		const lineEl = container.createDiv({ cls: 'gdrive-sync-history-line' });
+		const prefix = line.kind === 'removed' ? '-' : line.kind === 'added' ? '+' : ' ';
+		lineEl.addClass(`gdrive-sync-history-line--${line.kind}`);
+		lineEl.setText(`${prefix} ${line.text.length > 0 ? line.text : ' '}`);
+	}
 }
 
 function actorLabel(revision: DriveRevision): string {
@@ -60,7 +77,7 @@ export class VersionHistoryModal extends Modal {
 	private selectedContent = '';
 	private loading = false;
 	private error = '';
-	private showDiff = false;
+	private selectedContentIsText = false;
 
 	constructor(
 		app: App,
@@ -73,10 +90,12 @@ export class VersionHistoryModal extends Modal {
 
 	onOpen(): void {
 		this.titleEl.setText('Google Drive version history');
+		this.modalEl.addClass('gdrive-sync-history-modal');
 		void this.load();
 	}
 
 	onClose(): void {
+		this.modalEl.removeClass('gdrive-sync-history-modal');
 		this.contentEl.empty();
 	}
 
@@ -101,22 +120,26 @@ export class VersionHistoryModal extends Modal {
 
 	private async loadSelectedContent(): Promise<void> {
 		if (!this.selectedRevisionId) {
+			this.selectedContentIsText = false;
 			this.selectedContent = '';
 			return;
 		}
 
 		const selected = this.revisions.find(revision => revision.id === this.selectedRevisionId);
 		if (!selected) {
+			this.selectedContentIsText = false;
 			this.selectedContent = '';
 			return;
 		}
 
 		const bytes = await this.plugin.driveClient.downloadRevision(this.fileId, this.selectedRevisionId);
 		if (!isTextLike(this.filePath, selected.mimeType)) {
+			this.selectedContentIsText = false;
 			this.selectedContent = '[Binary revision preview unavailable]';
 			return;
 		}
 
+		this.selectedContentIsText = true;
 		this.selectedContent = new TextDecoder().decode(bytes);
 	}
 
@@ -162,21 +185,17 @@ export class VersionHistoryModal extends Modal {
 			});
 		}
 
-		new Setting(right)
-			.setName('Compare with current local version')
-			.addToggle(toggle => {
-				toggle.setValue(this.showDiff).onChange(value => {
-					this.showDiff = value;
-					this.render();
-				});
-			});
+		right.createEl('p', {
+			cls: 'gdrive-sync-history-preview-meta',
+			text: 'Comparing selected revision with current local file.',
+		});
 
-		const preview = right.createEl('pre', { cls: 'gdrive-sync-history-preview' });
-		if (this.showDiff) {
+		const preview = right.createDiv({ cls: 'gdrive-sync-history-preview' });
+		if (this.selectedContentIsText) {
 			void (async () => {
 				try {
 					const current = await this.plugin.app.vault.adapter.read(this.filePath);
-					preview.setText(diffText(current, this.selectedContent));
+					renderDiffLines(preview, diffLines(current, this.selectedContent));
 				} catch {
 					preview.setText(this.selectedContent);
 				}

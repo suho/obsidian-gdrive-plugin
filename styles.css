@@ -235,15 +235,16 @@ If your plugin does not need CSS, delete this file.
 
 .gdrive-sync-history-split {
 	display: grid;
-	grid-template-columns: minmax(180px, 240px) 1fr;
+	grid-template-columns: minmax(220px, 300px) 1fr;
 	gap: 12px;
+	min-height: 64vh;
 }
 
 .gdrive-sync-history-left {
 	display: flex;
 	flex-direction: column;
 	gap: 6px;
-	max-height: 380px;
+	max-height: 64vh;
 	overflow: auto;
 }
 
@@ -263,16 +264,55 @@ If your plugin does not need CSS, delete this file.
 	min-width: 0;
 }
 
+.gdrive-sync-history-preview-meta {
+	margin-top: 0;
+	margin-bottom: 8px;
+	color: var(--text-muted);
+	font-size: 0.82rem;
+}
+
 .gdrive-sync-history-preview {
-	margin-top: 8px;
-	padding: 10px;
+	padding: 8px 0;
 	background: var(--background-secondary);
 	border: 1px solid var(--background-modifier-border);
 	border-radius: 6px;
-	max-height: 380px;
+	max-height: 64vh;
+	min-height: 420px;
 	overflow: auto;
+	font-family: var(--font-monospace);
+	font-size: 0.82rem;
+	line-height: 1.35;
+}
+
+.gdrive-sync-history-line {
 	white-space: pre-wrap;
 	word-break: break-word;
+	padding: 1px 10px 1px 12px;
+	border-left: 3px solid transparent;
+}
+
+.gdrive-sync-history-line--removed {
+	background-color: rgba(220, 80, 80, 0.2);
+	border-left-color: rgba(220, 80, 80, 0.8);
+}
+
+.gdrive-sync-history-line--added {
+	background-color: rgba(80, 170, 110, 0.16);
+	background-color: color-mix(in srgb, var(--text-accent) 16%, transparent);
+	border-left-color: var(--text-accent);
+	color: var(--text-accent);
+}
+
+.gdrive-sync-history-line--context {
+	color: var(--text-normal);
+}
+
+.modal.gdrive-sync-history-modal {
+	width: min(96vw, 1200px);
+}
+
+.modal.gdrive-sync-history-modal .modal-content {
+	max-height: 86vh;
 }
 
 .gdrive-sync-progress-bar {
