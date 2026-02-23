@@ -76,7 +76,7 @@ export class ActivityLogView extends ItemView {
 	}
 
 	getIcon(): string {
-		return 'list';
+		return 'history';
 	}
 
 	setFilter(filter: ActivityLogFilter): void {
