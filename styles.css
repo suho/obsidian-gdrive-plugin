@@ -398,10 +398,34 @@ If your plugin does not need CSS, delete this file.
 .gdrive-sync-usage-progress {
 	width: 100%;
 	margin-top: 6px;
+	accent-color: var(--interactive-accent);
+	appearance: none;
+	-webkit-appearance: none;
+	border: 0;
+}
+
+.gdrive-sync-usage-progress::-webkit-progress-bar {
+	background-color: var(--background-modifier-border);
+}
+
+.gdrive-sync-usage-progress::-webkit-progress-value {
+	background-color: var(--interactive-accent);
+}
+
+.gdrive-sync-usage-progress::-moz-progress-bar {
+	background-color: var(--interactive-accent);
 }
 
 .gdrive-sync-usage-progress.is-warning {
 	accent-color: var(--color-red);
+}
+
+.gdrive-sync-usage-progress.is-warning::-webkit-progress-value {
+	background-color: var(--color-red);
+}
+
+.gdrive-sync-usage-progress.is-warning::-moz-progress-bar {
+	background-color: var(--color-red);
 }
 
 @media (max-width: 900px) {
