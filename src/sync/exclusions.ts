@@ -2,6 +2,19 @@ import type { GDrivePluginSettings } from '../settings';
 import { isGeneratedArtifactPath } from './generatedArtifacts';
 
 export type FileCategory = 'image' | 'audio' | 'video' | 'pdf' | 'other';
+export type ExclusionReason =
+	| 'hard-excluded'
+	| 'excluded-folder'
+	| 'vault-config-disabled'
+	| 'type-disabled'
+	| 'file-too-large';
+export type UserAdjustableSkipReason = 'selective-sync-disabled' | 'max-file-size' | 'excluded-folders';
+
+export interface UserAdjustableSkipCounts {
+	selectiveSyncDisabled: number;
+	maxFileSize: number;
+	excludedFolders: number;
+}
 
 type SelectiveSettings = Pick<
 	GDrivePluginSettings,
@@ -26,6 +39,28 @@ const AUDIO_EXTENSIONS = new Set([
 const VIDEO_EXTENSIONS = new Set([
 	'mp4', 'mov', 'mkv', 'webm', 'avi', 'm4v',
 ]);
+
+export function emptyUserAdjustableSkipCounts(): UserAdjustableSkipCounts {
+	return {
+		selectiveSyncDisabled: 0,
+		maxFileSize: 0,
+		excludedFolders: 0,
+	};
+}
+
+export function mergeUserAdjustableSkipCounts(
+	target: UserAdjustableSkipCounts,
+	source: UserAdjustableSkipCounts
+): UserAdjustableSkipCounts {
+	target.selectiveSyncDisabled += source.selectiveSyncDisabled;
+	target.maxFileSize += source.maxFileSize;
+	target.excludedFolders += source.excludedFolders;
+	return target;
+}
+
+export function totalUserAdjustableSkipCounts(counts: UserAdjustableSkipCounts): number {
+	return counts.selectiveSyncDisabled + counts.maxFileSize + counts.excludedFolders;
+}
 
 function normalize(value: string): string {
 	return value.replace(/\\/gu, '/').replace(/^\/+/u, '').replace(/\/+/gu, '/');
@@ -109,14 +144,14 @@ function matchesUserExclusion(path: string, rawExclusion: string): boolean {
 	return normalizedPath === exclusion || normalizedPath.startsWith(`${exclusion}/`);
 }
 
-function isTypeExcluded(path: string, settings: SelectiveSettings): boolean {
+function typeExclusionReason(path: string, settings: SelectiveSettings): ExclusionReason | null {
 	const type = classifyFileType(path);
-	if (type === 'image' && !settings.syncImages) return true;
-	if (type === 'audio' && !settings.syncAudio) return true;
-	if (type === 'video' && !settings.syncVideo) return true;
-	if (type === 'pdf' && !settings.syncPdfs) return true;
-	if (type === 'other' && !settings.syncOtherTypes) return true;
-	return false;
+	if (type === 'image' && !settings.syncImages) return 'type-disabled';
+	if (type === 'audio' && !settings.syncAudio) return 'type-disabled';
+	if (type === 'video' && !settings.syncVideo) return 'type-disabled';
+	if (type === 'pdf' && !settings.syncPdfs) return 'type-disabled';
+	if (type === 'other' && !settings.syncOtherTypes) return 'type-disabled';
+	return null;
 }
 
 function isOverMaxFileSize(fileSizeBytes: number | undefined, settings: SelectiveSettings): boolean {
@@ -137,6 +172,52 @@ function isVaultConfigExcluded(path: string, settings: SelectiveSettings, config
 	return !isAllowedVaultConfigPath(relativePath, settings);
 }
 
+export function getExclusionReason(
+	path: string,
+	userExclusions: string[],
+	settings: SelectiveSettings,
+	configDir: string,
+	fileSizeBytes?: number
+): ExclusionReason | null {
+	const normalizedPath = normalize(path);
+	const normalizedConfigDir = normalizePrefix(configDir);
+
+	if (isHardExcluded(path, configDir)) return 'hard-excluded';
+	if (userExclusions.some(exclusion => matchesUserExclusion(normalizedPath, exclusion))) return 'excluded-folder';
+	if (isWithinConfigDir(normalizedPath, normalizedConfigDir)) {
+		return isVaultConfigExcluded(normalizedPath, settings, normalizedConfigDir)
+			? 'vault-config-disabled'
+			: null;
+	}
+	const typeReason = typeExclusionReason(normalizedPath, settings);
+	if (typeReason) return typeReason;
+	if (isOverMaxFileSize(fileSizeBytes, settings)) return 'file-too-large';
+	return null;
+}
+
+export function toUserAdjustableSkipReason(reason: ExclusionReason): UserAdjustableSkipReason | null {
+	if (reason === 'excluded-folder') return 'excluded-folders';
+	if (reason === 'file-too-large') return 'max-file-size';
+	if (reason === 'type-disabled' || reason === 'vault-config-disabled') return 'selective-sync-disabled';
+	return null;
+}
+
+export function addUserAdjustableSkipCount(counts: UserAdjustableSkipCounts, reason: ExclusionReason): void {
+	const mapped = toUserAdjustableSkipReason(reason);
+	if (!mapped) {
+		return;
+	}
+	if (mapped === 'selective-sync-disabled') {
+		counts.selectiveSyncDisabled += 1;
+		return;
+	}
+	if (mapped === 'max-file-size') {
+		counts.maxFileSize += 1;
+		return;
+	}
+	counts.excludedFolders += 1;
+}
+
 export function isExcluded(
 	path: string,
 	userExclusions: string[],
@@ -144,15 +225,5 @@ export function isExcluded(
 	configDir: string,
 	fileSizeBytes?: number
 ): boolean {
-	const normalizedPath = normalize(path);
-	const normalizedConfigDir = normalizePrefix(configDir);
-
-	if (isHardExcluded(path, configDir)) return true;
-	if (userExclusions.some(exclusion => matchesUserExclusion(normalizedPath, exclusion))) return true;
-	if (isWithinConfigDir(normalizedPath, normalizedConfigDir)) {
-		return isVaultConfigExcluded(normalizedPath, settings, normalizedConfigDir);
-	}
-	if (isTypeExcluded(normalizedPath, settings)) return true;
-	if (isOverMaxFileSize(fileSizeBytes, settings)) return true;
-	return false;
+	return getExclusionReason(path, userExclusions, settings, configDir, fileSizeBytes) !== null;
 }

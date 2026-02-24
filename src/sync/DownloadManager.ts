@@ -6,7 +6,14 @@ import { computeContentHash } from '../utils/checksums';
 import type { ConflictResolver } from './ConflictResolver';
 import type { SnapshotManager } from './SnapshotManager';
 import type { SyncDatabase } from './SyncDatabase';
-import { isExcluded } from './exclusions';
+import {
+	addUserAdjustableSkipCount,
+	emptyUserAdjustableSkipCounts,
+	getExclusionReason,
+	toUserAdjustableSkipReason,
+	type ExclusionReason,
+	type UserAdjustableSkipCounts,
+} from './exclusions';
 
 export type DownloadResult = 'pulled' | 'deleted' | 'renamed' | 'deferred' | 'skipped';
 
@@ -23,6 +30,8 @@ export class DownloadManager {
 	private readonly pendingDownloads = new Map<string, PendingDownload>();
 	private readonly trashDir: string;
 	private readonly folderPathCache = new Map<string, string | null>();
+	private excludedBySettingsCounts = emptyUserAdjustableSkipCounts();
+	private readonly countedExcludedPathReasons = new Set<string>();
 
 	constructor(
 		private readonly plugin: GDriveSyncPlugin,
@@ -41,6 +50,21 @@ export class DownloadManager {
 		this.plugin.registerEvent(this.plugin.app.workspace.on('active-leaf-change', () => {
 			void this.processPendingDownloads();
 		}));
+	}
+
+	resetExcludedBySettingsCounts(): void {
+		this.excludedBySettingsCounts = emptyUserAdjustableSkipCounts();
+		this.countedExcludedPathReasons.clear();
+	}
+
+	consumeExcludedBySettingsCounts(): UserAdjustableSkipCounts {
+		const snapshot: UserAdjustableSkipCounts = {
+			selectiveSyncDisabled: this.excludedBySettingsCounts.selectiveSyncDisabled,
+			maxFileSize: this.excludedBySettingsCounts.maxFileSize,
+			excludedFolders: this.excludedBySettingsCounts.excludedFolders,
+		};
+		this.resetExcludedBySettingsCounts();
+		return snapshot;
 	}
 
 	getPendingCount(): number {
@@ -323,13 +347,31 @@ export class DownloadManager {
 	}
 
 	private isPathExcluded(path: string, fileSizeBytes?: number): boolean {
-		return isExcluded(
+		const reason = getExclusionReason(
 			path,
 			this.plugin.settings.excludedPaths,
 			this.plugin.settings,
 			this.plugin.app.vault.configDir,
 			fileSizeBytes
 		);
+		if (!reason) {
+			return false;
+		}
+		this.trackExcludedBySettings(path, reason);
+		return true;
+	}
+
+	private trackExcludedBySettings(path: string, reason: ExclusionReason): void {
+		const mappedReason = toUserAdjustableSkipReason(reason);
+		if (!mappedReason) {
+			return;
+		}
+		const key = `${mappedReason}:${normalizePath(path)}`;
+		if (this.countedExcludedPathReasons.has(key)) {
+			return;
+		}
+		this.countedExcludedPathReasons.add(key);
+		addUserAdjustableSkipCount(this.excludedBySettingsCounts, reason);
 	}
 
 	private async saveMarkdownSnapshot(path: string, content: ArrayBuffer): Promise<void> {

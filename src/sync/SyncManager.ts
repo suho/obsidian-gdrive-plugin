@@ -11,7 +11,13 @@ import { isOnline } from '../utils/network';
 import { SyncStatusBar } from '../ui/SyncStatusBar';
 import { ConflictResolver } from './ConflictResolver';
 import { DownloadManager } from './DownloadManager';
-import { isExcluded } from './exclusions';
+import {
+	emptyUserAdjustableSkipCounts,
+	isExcluded,
+	mergeUserAdjustableSkipCounts,
+	totalUserAdjustableSkipCounts,
+	type UserAdjustableSkipCounts,
+} from './exclusions';
 import { canonicalPathForGeneratedVariant, isGeneratedArtifactPath } from './generatedArtifacts';
 import { SnapshotManager } from './SnapshotManager';
 import { SyncDatabase } from './SyncDatabase';
@@ -224,6 +230,7 @@ const TRANSFER_CONCURRENCY = 3;
 
 export class SyncManager {
 	private static readonly FILE_OPEN_REFRESH_COOLDOWN_MS = 1500;
+	private static readonly SETTINGS_SKIP_NOTICE_COOLDOWN_MS = 5 * 60 * 1000;
 
 	private syncLock = false;
 	private pushFlushInFlight = false;
@@ -250,6 +257,8 @@ export class SyncManager {
 	private uploadsBlockedByStorageQuota = false;
 	private shuttingDown = false;
 	private readonly storageQuotaStatusMessage = 'Google Drive storage is full. Uploads are paused.';
+	private lastSettingsSkipNoticeAt = 0;
+	private lastSettingsSkipNoticeFingerprint = '';
 
 	readonly syncDb: SyncDatabase;
 	readonly snapshotManager: SnapshotManager;
@@ -412,6 +421,7 @@ export class SyncManager {
 
 		this.syncLock = true;
 		this.statusBar.setSyncing();
+		this.resetSkippedBySettingsTracking();
 
 		try {
 			checkCancelled();
@@ -471,6 +481,10 @@ export class SyncManager {
 				this.statusBar.setSynced();
 			}
 			this.maybeWarnProjectedQuotaUsage();
+			this.maybeShowSkippedBySettingsNotice(
+				this.uploadManager.consumeExcludedBySettingsCounts(),
+				this.downloadManager.consumeExcludedBySettingsCounts()
+			);
 			return {
 				pulled: pullSummary.processed,
 				created: fullPushResult.summary.created + replaySummary.created + queuedPushSummary.created,
@@ -494,6 +508,7 @@ export class SyncManager {
 			new Notice(`Sync failed: ${message}`);
 			return null;
 		} finally {
+			this.resetSkippedBySettingsTracking();
 			this.syncLock = false;
 			this.updateStatusFromCurrentState();
 		}
@@ -532,6 +547,7 @@ export class SyncManager {
 
 		this.syncLock = true;
 		this.statusBar.setSyncing(this.pendingPushQueue.length + this.offlineQueue.length);
+		this.resetSkippedBySettingsTracking();
 
 		try {
 			const replaySummary = await this.replayOfflineQueue();
@@ -547,6 +563,10 @@ export class SyncManager {
 
 			this.errorAlertMessage = '';
 			this.maybeWarnProjectedQuotaUsage();
+			this.maybeShowSkippedBySettingsNotice(
+				this.uploadManager.consumeExcludedBySettingsCounts(),
+				this.downloadManager.consumeExcludedBySettingsCounts()
+			);
 			return {
 				created: replaySummary.created + queuedSummary.created + fullPushResult.summary.created,
 				updated: replaySummary.updated + queuedSummary.updated + fullPushResult.summary.updated,
@@ -565,6 +585,7 @@ export class SyncManager {
 			new Notice(`Google Drive push failed: ${message}`);
 			return null;
 		} finally {
+			this.resetSkippedBySettingsTracking();
 			this.syncLock = false;
 			this.updateStatusFromCurrentState();
 		}
@@ -598,6 +619,7 @@ export class SyncManager {
 
 		this.syncLock = true;
 		this.statusBar.setSyncing();
+		this.resetSkippedBySettingsTracking();
 		try {
 			const summary = await this.pullChanges({ allowActiveWrite: true });
 			if (summary.processed > 0) {
@@ -605,6 +627,10 @@ export class SyncManager {
 			}
 			this.errorAlertMessage = '';
 			this.maybeWarnProjectedQuotaUsage();
+			this.maybeShowSkippedBySettingsNotice(
+				this.uploadManager.consumeExcludedBySettingsCounts(),
+				this.downloadManager.consumeExcludedBySettingsCounts()
+			);
 			return summary;
 		} catch (err) {
 			const message = err instanceof Error ? err.message : String(err);
@@ -614,6 +640,7 @@ export class SyncManager {
 			new Notice(`Google Drive pull failed: ${message}`);
 			return null;
 		} finally {
+			this.resetSkippedBySettingsTracking();
 			this.syncLock = false;
 			this.updateStatusFromCurrentState();
 		}
@@ -1655,6 +1682,7 @@ export class SyncManager {
 		}
 
 		this.pullInFlight = true;
+		this.resetSkippedBySettingsTracking();
 		try {
 			this.statusBar.setSyncing();
 			const pullSummary = await this.pullChanges();
@@ -1665,6 +1693,10 @@ export class SyncManager {
 			await this.flushPendingPushQueue();
 			this.errorAlertMessage = '';
 			this.maybeWarnProjectedQuotaUsage();
+			this.maybeShowSkippedBySettingsNotice(
+				this.uploadManager.consumeExcludedBySettingsCounts(),
+				this.downloadManager.consumeExcludedBySettingsCounts()
+			);
 		} catch (err) {
 			if (err instanceof StorageQuotaError) {
 				this.handleStorageQuotaExceeded();
@@ -1675,6 +1707,7 @@ export class SyncManager {
 			this.statusBar.setError(message);
 			this.logError('', message);
 		} finally {
+			this.resetSkippedBySettingsTracking();
 			this.pullInFlight = false;
 			this.updateStatusFromCurrentState();
 		}
@@ -2313,6 +2346,68 @@ export class SyncManager {
 		new Notice(
 			`Google Drive API usage is projected at about ${snapshot.projectedRequestsToday} requests today (estimate: ${snapshot.estimatedDailyQuota}).`,
 			10000
+		);
+	}
+
+	private resetSkippedBySettingsTracking(): void {
+		this.uploadManager.resetExcludedBySettingsCounts();
+		this.downloadManager.resetExcludedBySettingsCounts();
+	}
+
+	private maybeShowSkippedBySettingsNotice(
+		localCounts: UserAdjustableSkipCounts,
+		remoteCounts: UserAdjustableSkipCounts
+	): void {
+		const merged = mergeUserAdjustableSkipCounts(
+			mergeUserAdjustableSkipCounts(emptyUserAdjustableSkipCounts(), localCounts),
+			remoteCounts
+		);
+		if (totalUserAdjustableSkipCounts(merged) === 0) {
+			return;
+		}
+
+		const localTotal = totalUserAdjustableSkipCounts(localCounts);
+		const remoteTotal = totalUserAdjustableSkipCounts(remoteCounts);
+		const fingerprint = [
+			merged.selectiveSyncDisabled,
+			merged.maxFileSize,
+			merged.excludedFolders,
+			localTotal,
+			remoteTotal,
+		].join(':');
+		const now = Date.now();
+		if (
+			this.lastSettingsSkipNoticeFingerprint === fingerprint &&
+			now - this.lastSettingsSkipNoticeAt < SyncManager.SETTINGS_SKIP_NOTICE_COOLDOWN_MS
+		) {
+			return;
+		}
+		this.lastSettingsSkipNoticeFingerprint = fingerprint;
+		this.lastSettingsSkipNoticeAt = now;
+
+		const scope: string[] = [];
+		if (localTotal > 0) {
+			scope.push(`local ${localTotal}`);
+		}
+		if (remoteTotal > 0) {
+			scope.push(`remote ${remoteTotal}`);
+		}
+		const scopeText = scope.length > 0 ? ` (${scope.join(', ')})` : '';
+
+		const reasonParts: string[] = [];
+		if (merged.selectiveSyncDisabled > 0) {
+			reasonParts.push(`selective sync disabled ${merged.selectiveSyncDisabled}`);
+		}
+		if (merged.maxFileSize > 0) {
+			reasonParts.push(`max file size ${merged.maxFileSize}`);
+		}
+		if (merged.excludedFolders > 0) {
+			reasonParts.push(`excluded folders ${merged.excludedFolders}`);
+		}
+
+		new Notice(
+			`Some files were skipped by sync settings${scopeText}: ${reasonParts.join(', ')}. Update settings if needed.`,
+			12000
 		);
 	}
 

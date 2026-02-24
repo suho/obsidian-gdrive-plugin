@@ -4,7 +4,14 @@ import type { DriveClient } from '../gdrive/DriveClient';
 import type { DriveFileMetadata, SyncRecord } from '../types';
 import { computeContentHash } from '../utils/checksums';
 import { runWithConcurrencyLimit } from '../utils/concurrency';
-import { isExcluded } from './exclusions';
+import {
+	addUserAdjustableSkipCount,
+	emptyUserAdjustableSkipCounts,
+	getExclusionReason,
+	toUserAdjustableSkipReason,
+	type ExclusionReason,
+	type UserAdjustableSkipCounts,
+} from './exclusions';
 import type { SnapshotManager } from './SnapshotManager';
 import type { SyncDatabase } from './SyncDatabase';
 
@@ -58,12 +65,30 @@ type SyncOperation =
 const TRANSFER_CONCURRENCY = 3;
 
 export class UploadManager {
+	private excludedBySettingsCounts = emptyUserAdjustableSkipCounts();
+	private readonly countedExcludedPathReasons = new Set<string>();
+
 	constructor(
 		private readonly plugin: GDriveSyncPlugin,
 		private readonly driveClient: DriveClient,
 		private readonly syncDb: SyncDatabase,
 		private readonly snapshotManager: SnapshotManager
 	) {}
+
+	resetExcludedBySettingsCounts(): void {
+		this.excludedBySettingsCounts = emptyUserAdjustableSkipCounts();
+		this.countedExcludedPathReasons.clear();
+	}
+
+	consumeExcludedBySettingsCounts(): UserAdjustableSkipCounts {
+		const snapshot: UserAdjustableSkipCounts = {
+			selectiveSyncDisabled: this.excludedBySettingsCounts.selectiveSyncDisabled,
+			maxFileSize: this.excludedBySettingsCounts.maxFileSize,
+			excludedFolders: this.excludedBySettingsCounts.excludedFolders,
+		};
+		this.resetExcludedBySettingsCounts();
+		return snapshot;
+	}
 
 	async syncLocalVault(): Promise<{ summary: UploadSummary; changedDb: boolean }> {
 		const summary: UploadSummary = {
@@ -410,13 +435,31 @@ export class UploadManager {
 	}
 
 	private isPathExcluded(path: string, fileSizeBytes?: number): boolean {
-		return isExcluded(
+		const reason = getExclusionReason(
 			path,
 			this.plugin.settings.excludedPaths,
 			this.plugin.settings,
 			this.plugin.app.vault.configDir,
 			fileSizeBytes
 		);
+		if (!reason) {
+			return false;
+		}
+		this.trackExcludedBySettings(path, reason);
+		return true;
+	}
+
+	private trackExcludedBySettings(path: string, reason: ExclusionReason): void {
+		const mappedReason = toUserAdjustableSkipReason(reason);
+		if (!mappedReason) {
+			return;
+		}
+		const key = `${mappedReason}:${normalizePath(path)}`;
+		if (this.countedExcludedPathReasons.has(key)) {
+			return;
+		}
+		this.countedExcludedPathReasons.add(key);
+		addUserAdjustableSkipCount(this.excludedBySettingsCounts, reason);
 	}
 
 	private async saveMarkdownSnapshot(path: string, content: ArrayBuffer): Promise<void> {
