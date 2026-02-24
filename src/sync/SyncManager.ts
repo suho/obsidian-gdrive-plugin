@@ -12,10 +12,13 @@ import { SyncStatusBar } from '../ui/SyncStatusBar';
 import { ConflictResolver } from './ConflictResolver';
 import { DownloadManager } from './DownloadManager';
 import {
+	describeUserAdjustableExclusionReason,
 	emptyUserAdjustableSkipCounts,
+	getExclusionReason,
 	isExcluded,
 	mergeUserAdjustableSkipCounts,
 	totalUserAdjustableSkipCounts,
+	toUserAdjustableSkipReason,
 	type UserAdjustableSkipCounts,
 } from './exclusions';
 import { canonicalPathForGeneratedVariant, isGeneratedArtifactPath } from './generatedArtifacts';
@@ -52,6 +55,18 @@ export interface FullResyncPreview {
 	conflicts: number;
 	localFiles: number;
 	remoteFiles: number;
+}
+
+export interface SyncIgnoredFileEntry {
+	path: string;
+	source: 'local' | 'remote';
+	reason: 'selective-sync-disabled' | 'max-file-size' | 'excluded-folders';
+	reasonText: string;
+}
+
+export interface SyncIgnoredFilesSnapshot {
+	entries: SyncIgnoredFileEntry[];
+	remoteWarning: string;
 }
 
 interface OfflineQueuePayload {
@@ -1306,6 +1321,85 @@ export class SyncManager {
 
 	getConflictAlertCount(): number {
 		return this.conflictAlertCount;
+	}
+
+	async listSyncIgnoredFiles(): Promise<SyncIgnoredFilesSnapshot> {
+		const entries: SyncIgnoredFileEntry[] = [];
+		const seen = new Set<string>();
+
+		const appendEntry = (
+			source: SyncIgnoredFileEntry['source'],
+			path: string,
+			fileSizeBytes?: number
+		): void => {
+			const reason = getExclusionReason(
+				path,
+				this.plugin.settings.excludedPaths,
+				this.plugin.settings,
+				this.plugin.app.vault.configDir,
+				fileSizeBytes
+			);
+			if (!reason) {
+				return;
+			}
+			const mappedReason = toUserAdjustableSkipReason(reason);
+			if (!mappedReason) {
+				return;
+			}
+			const reasonText = describeUserAdjustableExclusionReason(path, reason, this.plugin.app.vault.configDir);
+			if (!reasonText) {
+				return;
+			}
+
+			const normalizedPath = normalizePath(path);
+			const dedupeKey = `${source}:${mappedReason}:${normalizedPath}`;
+			if (seen.has(dedupeKey)) {
+				return;
+			}
+			seen.add(dedupeKey);
+			entries.push({
+				path: normalizedPath,
+				source,
+				reason: mappedReason,
+				reasonText,
+			});
+		};
+
+		const localPaths = await this.collectAllLocalPaths();
+		for (const localPath of localPaths) {
+			const stat = await this.plugin.app.vault.adapter.stat(localPath);
+			appendEntry('local', localPath, stat?.size);
+		}
+
+		let remoteWarning = '';
+		if (this.plugin.settings.gDriveFolderId) {
+			try {
+				const remoteFiles = await this.driveClient.listAllFilesRecursiveWithPaths(this.plugin.settings.gDriveFolderId);
+				for (const remoteFile of remoteFiles) {
+					const remoteSize = remoteFile.file.size ? Number(remoteFile.file.size) : undefined;
+					appendEntry(
+						'remote',
+						normalizePath(remoteFile.path),
+						Number.isFinite(remoteSize) ? remoteSize : undefined
+					);
+				}
+			} catch (err) {
+				remoteWarning = `Remote files could not be loaded: ${err instanceof Error ? err.message : String(err)}`;
+			}
+		}
+
+		entries.sort((a, b) => {
+			const sourceOrder = a.source.localeCompare(b.source);
+			if (sourceOrder !== 0) {
+				return sourceOrder;
+			}
+			return a.path.localeCompare(b.path);
+		});
+
+		return {
+			entries,
+			remoteWarning,
+		};
 	}
 
 	captureSelectiveSyncSnapshot(): SelectiveSyncSnapshot {

@@ -453,6 +453,15 @@ export class GDriveSettingTab extends PluginSettingTab {
 				})
 			);
 
+		new Setting(containerEl)
+			.setName('View sync ignored files')
+			.setDesc('Show ignored local and remote files with the reason for each file.')
+			.addButton(button =>
+				button.setButtonText('Open').onClick(() => {
+					this.plugin.openSyncIgnoredFilesModal();
+				})
+			);
+
 		// ── Vault config sync ─────────────────────────────────────────
 		new Setting(containerEl).setName('Vault configuration sync').setHeading();
 

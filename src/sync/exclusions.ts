@@ -82,6 +82,15 @@ function isWithinConfigDir(path: string, configDir: string): boolean {
 	return path === configDir || path.startsWith(`${configDir}/`);
 }
 
+function relativeConfigPath(path: string, configDir: string): string | null {
+	const normalizedPath = normalize(path);
+	const normalizedConfigDir = normalizePrefix(configDir);
+	if (!isWithinConfigDir(normalizedPath, normalizedConfigDir)) {
+		return null;
+	}
+	return normalizedPath.slice(normalizedConfigDir.length + 1);
+}
+
 function isAllowedVaultConfigPath(relativePath: string, settings: SelectiveSettings): boolean {
 	if (relativePath === 'app.json') return settings.syncEditorSettings;
 	if (relativePath === 'appearance.json') return settings.syncAppearance;
@@ -199,6 +208,35 @@ export function toUserAdjustableSkipReason(reason: ExclusionReason): UserAdjusta
 	if (reason === 'excluded-folder') return 'excluded-folders';
 	if (reason === 'file-too-large') return 'max-file-size';
 	if (reason === 'type-disabled' || reason === 'vault-config-disabled') return 'selective-sync-disabled';
+	return null;
+}
+
+export function describeUserAdjustableExclusionReason(path: string, reason: ExclusionReason, configDir: string): string | null {
+	if (reason === 'excluded-folder') {
+		return 'Path is in an excluded folder.';
+	}
+	if (reason === 'file-too-large') {
+		return 'File is larger than max file size.';
+	}
+	if (reason === 'type-disabled') {
+		const type = classifyFileType(path);
+		if (type === 'image') return 'Image file sync is turned off.';
+		if (type === 'audio') return 'Audio file sync is turned off.';
+		if (type === 'video') return 'Video file sync is turned off.';
+		if (type === 'pdf') return 'PDF file sync is turned off.';
+		return 'Other file type sync is turned off.';
+	}
+	if (reason === 'vault-config-disabled') {
+		const relativePath = relativeConfigPath(path, configDir);
+		if (relativePath === 'app.json') return 'Editor settings sync is turned off.';
+		if (relativePath === 'appearance.json') return 'Appearance sync is turned off.';
+		if (relativePath === 'hotkeys.json') return 'Hotkeys sync is turned off.';
+		if (relativePath === 'community-plugins.json') return 'Community plugin list sync is turned off.';
+		if (relativePath?.startsWith('themes/') || relativePath?.startsWith('snippets/')) {
+			return 'Appearance sync is turned off.';
+		}
+		return 'Vault configuration sync for this file is turned off.';
+	}
 	return null;
 }
 

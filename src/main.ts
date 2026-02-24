@@ -11,6 +11,7 @@ import { LargestFilesModal } from './ui/LargestFilesModal';
 import { ProgressModal } from './ui/ProgressModal';
 import { GDriveSettingTab } from './ui/SettingTab';
 import { SetupWizard } from './ui/SetupWizard';
+import { SyncIgnoredFilesModal } from './ui/SyncIgnoredFilesModal';
 import { SyncStatusBar, type SyncStatusSnapshot } from './ui/SyncStatusBar';
 import { SyncStatusModal } from './ui/SyncStatusModal';
 import { VersionHistoryModal } from './ui/VersionHistoryModal';
@@ -345,6 +346,10 @@ export default class GDriveSyncPlugin extends Plugin {
 
 	openLargestFilesModal(): void {
 		new LargestFilesModal(this.app, this).open();
+	}
+
+	openSyncIgnoredFilesModal(): void {
+		new SyncIgnoredFilesModal(this.app, this).open();
 	}
 
 	openVersionHistory(filePath: string, fileId: string): void {
