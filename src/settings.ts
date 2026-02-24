@@ -662,6 +662,10 @@ export class GDriveSettingTab extends PluginSettingTab {
 	private renderUsageMetrics(containerEl: HTMLElement, isConnected: boolean): void {
 		const storageSetting = new Setting(containerEl).setName('Storage usage');
 		const apiSetting = new Setting(containerEl).setName('API usage');
+		storageSetting.settingEl.addClass('gdrive-sync-usage-setting');
+		apiSetting.settingEl.addClass('gdrive-sync-usage-setting');
+		storageSetting.descEl.addClass('gdrive-sync-storage-usage');
+		apiSetting.descEl.addClass('gdrive-sync-usage-metric');
 
 		if (!isConnected) {
 			storageSetting.setDesc('Unavailable until connected.');

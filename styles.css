@@ -315,9 +315,37 @@ If your plugin does not need CSS, delete this file.
 	max-height: 86vh;
 }
 
-.gdrive-sync-progress-bar {
+.gdrive-sync-progress-bar,
+.gdrive-sync-usage-progress {
 	width: 100%;
+	accent-color: var(--interactive-accent);
+	appearance: none;
+	-webkit-appearance: none;
+	border: 0;
+	border-radius: 8px;
+	overflow: hidden;
+}
+
+.gdrive-sync-progress-bar {
 	margin-top: 4px;
+}
+
+.gdrive-sync-progress-bar::-webkit-progress-bar,
+.gdrive-sync-usage-progress::-webkit-progress-bar {
+	background-color: var(--background-modifier-border);
+	border-radius: 8px;
+}
+
+.gdrive-sync-progress-bar::-webkit-progress-value,
+.gdrive-sync-usage-progress::-webkit-progress-value {
+	background-color: var(--interactive-accent);
+	border-radius: 8px;
+}
+
+.gdrive-sync-progress-bar::-moz-progress-bar,
+.gdrive-sync-usage-progress::-moz-progress-bar {
+	background-color: var(--interactive-accent);
+	border-radius: 8px;
 }
 
 .gdrive-sync-progress-meta {
@@ -348,9 +376,24 @@ If your plugin does not need CSS, delete this file.
 	padding: 3px 0;
 }
 
+.gdrive-sync-usage-metric,
 .gdrive-sync-storage-usage {
 	color: var(--text-muted);
 	margin-bottom: 8px;
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	width: 100%;
+	max-width: 100%;
+}
+
+.gdrive-sync-usage-metric .gdrive-sync-usage-progress,
+.gdrive-sync-storage-usage .gdrive-sync-usage-progress {
+	width: 100%;
+	max-width: 100%;
+	display: block;
+	align-self: stretch;
+	box-sizing: border-box;
 }
 
 .gdrive-sync-radio-group {
@@ -398,22 +441,13 @@ If your plugin does not need CSS, delete this file.
 .gdrive-sync-usage-progress {
 	width: 100%;
 	margin-top: 6px;
-	accent-color: var(--interactive-accent);
-	appearance: none;
-	-webkit-appearance: none;
-	border: 0;
 }
 
-.gdrive-sync-usage-progress::-webkit-progress-bar {
-	background-color: var(--background-modifier-border);
-}
-
-.gdrive-sync-usage-progress::-webkit-progress-value {
-	background-color: var(--interactive-accent);
-}
-
-.gdrive-sync-usage-progress::-moz-progress-bar {
-	background-color: var(--interactive-accent);
+.gdrive-sync-usage-setting .setting-item-info,
+.gdrive-sync-usage-setting .setting-item-description {
+	width: 100%;
+	max-width: 100%;
+	min-width: 0;
 }
 
 .gdrive-sync-usage-progress.is-warning {
@@ -435,5 +469,11 @@ If your plugin does not need CSS, delete this file.
 
 	.gdrive-sync-history-split {
 		grid-template-columns: 1fr;
+	}
+
+	.gdrive-sync-usage-setting .setting-item-info,
+	.gdrive-sync-usage-setting .setting-item-description {
+		width: 100%;
+		max-width: 100%;
 	}
 }
