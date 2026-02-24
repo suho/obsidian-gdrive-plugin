@@ -47,6 +47,26 @@ function isRetryableRateLimitError(status: number, reason: string | undefined): 
 	return reason === 'rateLimitExceeded' || reason === 'userRateLimitExceeded' || reason === 'quotaExceeded';
 }
 
+function getHeaderValue(headers: Record<string, string> | undefined, name: string): string | undefined {
+	if (!headers) {
+		return undefined;
+	}
+
+	const directValue = headers[name];
+	if (typeof directValue === 'string' && directValue.length > 0) {
+		return directValue;
+	}
+
+	const targetName = name.toLowerCase();
+	for (const [headerName, headerValue] of Object.entries(headers)) {
+		if (headerName.toLowerCase() === targetName && headerValue.length > 0) {
+			return headerValue;
+		}
+	}
+
+	return undefined;
+}
+
 export class DriveClientError extends Error {
 	constructor(
 		message: string,
@@ -695,14 +715,18 @@ export class DriveClient {
 			this.assertOk(initiateResponse.status, initiateResponse.text);
 		}
 
-		const sessionUri = initiateResponse.headers['location'];
+		const sessionUri =
+			getHeaderValue(initiateResponse.headers, 'location') ??
+			getHeaderValue(initiateResponse.headers, 'x-goog-upload-url');
 		if (!sessionUri) {
-			throw new DriveClientError('Resumable upload: no session URI in response');
+			throw new DriveClientError(
+				`Resumable upload: no session URI in response (status ${initiateResponse.status})`
+			);
 		}
 
 		// Step 2: Upload content
 		const uploadResponse = await requestUrl({
-			url: sessionUri,
+			url: sessionUri.trim(),
 			method: 'PUT',
 			headers: {
 				'Content-Length': String(content.byteLength),
