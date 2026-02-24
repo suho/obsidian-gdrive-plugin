@@ -122,6 +122,7 @@ export class SetupWizard extends Modal {
 	private planningError = '';
 	private initialSyncInProgress = false;
 	private initialSyncProgress = '';
+	private initialSyncRan = false;
 	private oauthClientIdInput = '';
 	private oauthClientSecretInput = '';
 
@@ -135,6 +136,7 @@ export class SetupWizard extends Modal {
 
 	onOpen(): void {
 		this.step = this.plugin.authManager.isAuthenticated ? 'folder' : 'authenticate';
+		this.initialSyncRan = false;
 		this.oauthClientIdInput = this.plugin.settings.oauthClientId;
 		this.oauthClientSecretInput = this.plugin.settings.oauthClientSecret;
 		this.titleEl.setText('Set up sync with Google Drive');
@@ -585,10 +587,15 @@ export class SetupWizard extends Modal {
 		const mergeCount = plan.conflicts.filter(conflict => conflict.action === 'merge-markers').length;
 		const uploadCount = plan.uploads.length + keepLocalCount + mergeCount;
 		const downloadCount = plan.downloads.length + keepRemoteCount + mergeCount;
+		const hasInitialChanges = uploadCount + downloadCount + plan.conflicts.length > 0;
 
-		this.contentEl.createEl('p').setText(
-			`${uploadCount} files will be uploaded, ${downloadCount} files will be downloaded, and ${plan.conflicts.length} conflicts will be resolved.`
-		);
+		if (hasInitialChanges) {
+			this.contentEl.createEl('p').setText(
+				`${uploadCount} files will be uploaded, ${downloadCount} files will be downloaded, and ${plan.conflicts.length} conflicts will be resolved.`
+			);
+		} else {
+			this.contentEl.createEl('p').setText('No sync changes were detected. Confirm to finish setup.');
+		}
 
 		if (mergeCount > 0) {
 			this.contentEl.createEl('p').setText(
@@ -598,7 +605,7 @@ export class SetupWizard extends Modal {
 
 		if (this.initialSyncInProgress) {
 			const progress = this.contentEl.createEl('p');
-			progress.addClass('gdrive-sync-notice');
+			progress.addClass('gdrive-sync-notice', 'gdrive-sync-initial-sync-progress');
 			progress.setText(this.initialSyncProgress || 'Running initial sync...');
 		}
 
@@ -616,12 +623,16 @@ export class SetupWizard extends Modal {
 
 		const confirmBtn = buttonRow.createEl('button');
 		confirmBtn.addClass('mod-cta');
-		confirmBtn.setText(this.initialSyncInProgress ? 'Syncing...' : 'Confirm and run initial sync');
+		confirmBtn.setText(this.initialSyncInProgress ? 'Syncing...' : (hasInitialChanges ? 'Confirm and run initial sync' : 'Confirm and finish setup'));
 		if (this.initialSyncInProgress) {
 			confirmBtn.setAttr('disabled', 'true');
 		}
 		confirmBtn.addEventListener('click', () => {
 			if (this.initialSyncInProgress) {
+				return;
+			}
+			if (!hasInitialChanges) {
+				void this.completeSetupWithoutInitialSync();
 				return;
 			}
 			void this.executeInitialSyncPlan();
@@ -630,19 +641,25 @@ export class SetupWizard extends Modal {
 
 	private renderDoneStep(): void {
 		this.titleEl.setText('Setup complete');
-		this.contentEl.createEl('p').setText(
-			`Initial sync is complete. Your vault is now connected to "${this.selectedFolderName || this.newFolderName}" on Google Drive.`
-		);
+		const folderName = this.selectedFolderName || this.newFolderName;
+		if (this.initialSyncRan) {
+			this.contentEl.createEl('p').setText(
+				`Initial sync is complete. Your vault is now connected to "${folderName}" on Google Drive.`
+			);
+		} else {
+			this.contentEl.createEl('p').setText(
+				`No initial sync changes were needed. Your vault is now connected to "${folderName}" on Google Drive.`
+			);
+		}
 		this.contentEl.createEl('p').setText(
 			'Sync runs while Obsidian is in the foreground. On mobile, sync pauses in the background and resumes when you return.'
 		);
 
 		const doneBtn = this.contentEl.createEl('button');
 		doneBtn.addClass('mod-cta');
-		doneBtn.setText('Start syncing');
+		doneBtn.setText('Done');
 		doneBtn.addEventListener('click', () => {
 			this.close();
-			void this.plugin.triggerInitialSync();
 		});
 	}
 
@@ -841,18 +858,8 @@ export class SetupWizard extends Modal {
 				await syncDb.save();
 			});
 
-			this.initialSyncProgress = 'Finalizing setup...';
-			this.renderStep();
-			this.plugin.settings.setupComplete = true;
-			try {
-				this.plugin.settings.lastSyncPageToken = await this.plugin.driveClient.getStartPageToken();
-			} catch {
-				this.plugin.settings.lastSyncPageToken = '';
-			}
-			await this.plugin.saveSettings();
-			this.plugin.refreshSettingTab();
-
-			this.step = 'done';
+			this.initialSyncRan = true;
+			await this.completeSetup();
 		} catch (err) {
 			new Notice(`Initial sync failed: ${err instanceof Error ? err.message : String(err)}`, 12000);
 		} finally {
@@ -1081,6 +1088,36 @@ export class SetupWizard extends Modal {
 		}
 
 		return remoteFiles;
+	}
+
+	private async completeSetupWithoutInitialSync(): Promise<void> {
+		this.initialSyncInProgress = true;
+		this.initialSyncProgress = 'Finalizing setup...';
+		this.renderStep();
+		try {
+			this.initialSyncRan = false;
+			await this.completeSetup();
+		} catch (err) {
+			new Notice(`Setup failed: ${err instanceof Error ? err.message : String(err)}`, 12000);
+		} finally {
+			this.initialSyncInProgress = false;
+			this.initialSyncProgress = '';
+			this.renderStep();
+		}
+	}
+
+	private async completeSetup(): Promise<void> {
+		this.initialSyncProgress = 'Finalizing setup...';
+		this.renderStep();
+		this.plugin.settings.setupComplete = true;
+		try {
+			this.plugin.settings.lastSyncPageToken = await this.plugin.driveClient.getStartPageToken();
+		} catch {
+			this.plugin.settings.lastSyncPageToken = '';
+		}
+		await this.plugin.saveSettings();
+		this.plugin.refreshSettingTab();
+		this.step = 'done';
 	}
 
 	private async collectAllLocalPaths(): Promise<string[]> {

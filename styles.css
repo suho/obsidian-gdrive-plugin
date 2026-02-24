@@ -75,6 +75,10 @@ If your plugin does not need CSS, delete this file.
 	margin-top: 12px;
 }
 
+.gdrive-sync-initial-sync-progress {
+	padding-bottom: 8px;
+}
+
 .gdrive-sync-conflict-meta {
 	color: var(--text-muted);
 	margin-top: 4px;
