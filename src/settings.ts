@@ -169,46 +169,71 @@ export class GDriveSettingTab extends PluginSettingTab {
 					});
 			});
 
+		let refreshTokenDraft = this.plugin.settings.refreshToken;
+		let refreshTokenField: { setValue: (value: string) => unknown } | null = null;
 		new Setting(containerEl)
 			.setName('Refresh token')
 			.setDesc(
 				Platform.isMobile
-					? 'Paste or update the refresh token for this device. Changes are saved automatically.'
-					: 'Refresh token for this device. Use connect to Google Drive to set or replace this token.'
+					? 'Paste or update the refresh token for this device, then select save and validate.'
+					: 'Paste a refresh token from another vault, then select save and validate.'
 			)
 			.addText(text => {
-				text.setPlaceholder('Paste refresh token').setValue(this.plugin.settings.refreshToken);
-				if (!Platform.isMobile) {
-					text.inputEl.readOnly = true;
-				}
-				text.onChange(async value => {
-					if (!Platform.isMobile) {
-						return;
-					}
-					this.plugin.settings.refreshToken = value.trim();
-					await this.plugin.saveSettings();
-				});
-			});
+				refreshTokenField = text;
+				text
+					.setPlaceholder('Paste refresh token')
+					.setValue(refreshTokenDraft)
+					.onChange(value => {
+						refreshTokenDraft = value;
+					});
+			})
+			.addButton(btn =>
+				btn
+					.setButtonText('Save and validate')
+					.setCta()
+					.onClick(() => {
+						void (async () => {
+							btn.setDisabled(true);
+							try {
+								await this.plugin.authManager.importRefreshToken(refreshTokenDraft);
+								refreshTokenDraft = this.plugin.settings.refreshToken;
+								refreshTokenField?.setValue(refreshTokenDraft);
+								const connectedEmail = this.plugin.settings.connectedEmail;
+								new Notice(
+									connectedEmail ? `Connected as ${connectedEmail}` : 'Refresh token saved and validated.'
+								);
+								this.display();
+							} catch (err) {
+								new Notice(
+									`Could not validate refresh token: ${err instanceof Error ? err.message : String(err)}`,
+									12000
+								);
+							} finally {
+								btn.setDisabled(false);
+							}
+						})();
+					})
+			);
 
-		if (this.plugin.settings.needsReauthentication) {
-			if (Platform.isMobile) {
-				new Setting(containerEl)
-					.setName('Re-authentication required')
-					.setDesc('Google account access expired. Update the refresh token above to resume sync.');
-			} else {
-				new Setting(containerEl)
-					.setName('Re-authentication required')
-					.setDesc('Google account access expired. Select re-authenticate to resume sync.')
-					.addButton(btn =>
-						btn
-							.setButtonText('Re-authenticate')
-							.setCta()
-							.onClick(() => {
-								this.plugin.openSetupWizard();
-							})
-					);
+			if (this.plugin.settings.needsReauthentication) {
+				if (Platform.isMobile) {
+					new Setting(containerEl)
+						.setName('Re-authentication required')
+						.setDesc('Google account access expired. This token may have been replaced in another vault.');
+				} else {
+					new Setting(containerEl)
+						.setName('Re-authentication required')
+						.setDesc('Google account access expired. This token may have been replaced in another vault.')
+						.addButton(btn =>
+							btn
+								.setButtonText('Re-authenticate')
+								.setCta()
+								.onClick(() => {
+									this.plugin.openSetupWizard();
+								})
+						);
+				}
 			}
-		}
 
 		// ── Account ──────────────────────────────────────────────────
 		new Setting(containerEl).setName('Account').setHeading();

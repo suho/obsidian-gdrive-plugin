@@ -294,7 +294,7 @@ export class GoogleAuthManager {
 				this.plugin.refreshSettingTab();
 				this.showReauthenticateNotice();
 				throw new AuthError(
-					'Google account connection lost. Please re-authenticate in plugin settings.'
+					'Google account connection lost. This refresh token may have been replaced in another vault. Re-authenticate in plugin settings or paste a valid refresh token.'
 				);
 			}
 		}
@@ -405,7 +405,7 @@ export class GoogleAuthManager {
 			case 'invalid_grant':
 				return (
 					'The authorization code or refresh token is invalid or expired. ' +
-					'Retry sign-in and confirm your system clock is correct.'
+					'This can happen if another vault replaced the refresh token. Retry sign-in and confirm your system clock is correct.'
 				);
 			case 'redirect_uri_mismatch':
 				return 'The redirect URI does not match this OAuth client configuration.';

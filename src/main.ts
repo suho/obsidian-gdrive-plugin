@@ -244,7 +244,7 @@ export default class GDriveSyncPlugin extends Plugin {
 
 	openSetupWizard(): void {
 		if (Platform.isMobile && !this.settings.refreshToken) {
-			new Notice('Add a refresh token in plugin settings to connect on mobile.');
+			new Notice('Add a refresh token in plugin settings, then select save and validate.');
 			this.openPluginSettings();
 			return;
 		}
@@ -259,7 +259,7 @@ export default class GDriveSyncPlugin extends Plugin {
 	async syncNow(): Promise<void> {
 		if (!this.settings.setupComplete) {
 			if (Platform.isMobile && !this.settings.refreshToken) {
-				new Notice('Add a refresh token in plugin settings first.');
+				new Notice('Add a refresh token in plugin settings, then select save and validate.');
 				this.openPluginSettings();
 			} else {
 				new Notice('Complete Google Drive setup first.');
@@ -365,24 +365,33 @@ export default class GDriveSyncPlugin extends Plugin {
 				cancelText: 'Cancel',
 				warning: true,
 			});
-			if (!firstConfirm) {
-				return;
-			}
+				if (!firstConfirm) {
+					return;
+				}
 
-			const preview = await this.syncManager.previewFullResync();
-			const secondConfirm = await ConfirmModal.ask(this.app, {
-				title: 'Confirm full re-sync',
-				message:
-					`${preview.uploads} files will be uploaded, ` +
-					`${preview.downloads} files will be downloaded, ` +
-					`${preview.conflicts} conflicts may require resolution. Continue?`,
-				confirmText: 'Run full re-sync',
-				cancelText: 'Cancel',
-				warning: true,
-			});
-			if (!secondConfirm) {
-				return;
-			}
+				let preview;
+				try {
+					preview = await this.syncManager.previewFullResync();
+				} catch (err) {
+					const message = err instanceof Error ? err.message : String(err);
+					if (message !== 'Re-authentication required.') {
+						new Notice(`Could not prepare full re-sync: ${message}`, 12000);
+					}
+					return;
+				}
+				const secondConfirm = await ConfirmModal.ask(this.app, {
+					title: 'Confirm full re-sync',
+					message:
+						`${preview.uploads} files will be uploaded, ` +
+						`${preview.downloads} files will be downloaded, ` +
+						`${preview.conflicts} conflicts may require resolution. Continue?`,
+					confirmText: 'Run full re-sync',
+					cancelText: 'Cancel',
+					warning: true,
+				});
+				if (!secondConfirm) {
+					return;
+				}
 
 			let cancelled = false;
 			const progress = new ProgressModal(this.app, {

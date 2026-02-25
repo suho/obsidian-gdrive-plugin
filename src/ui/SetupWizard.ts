@@ -6,6 +6,7 @@ import { computeContentHash } from '../utils/checksums';
 import { isExcluded } from '../sync/exclusions';
 import { canonicalPathForGeneratedVariant } from '../sync/generatedArtifacts';
 import { ProgressModal } from './ProgressModal';
+import { ConfirmModal } from './ConfirmModal';
 
 type WizardStep = 'authenticate' | 'folder' | 'initial-state' | 'conflict-review' | 'confirm' | 'done';
 type InitialConflictAction = 'keep-local' | 'keep-remote' | 'merge-markers';
@@ -226,7 +227,7 @@ export class SetupWizard extends Modal {
 		if (Platform.isMobile) {
 			new Setting(this.contentEl)
 				.setName('Connect on mobile')
-				.setDesc('Open plugin settings and paste a refresh token in add refresh token.')
+				.setDesc('Open plugin settings, paste a refresh token, then select save and validate.')
 				.addButton(btn =>
 					btn
 						.setButtonText('Open settings')
@@ -277,6 +278,18 @@ export class SetupWizard extends Modal {
 					const errorEl = this.contentEl.querySelector('.gdrive-sync-error') ?? this.contentEl.createEl('p');
 					errorEl.addClass('gdrive-sync-error');
 					errorEl.setText('Add client ID first.');
+					return;
+				}
+				const shouldContinue = await ConfirmModal.ask(this.app, {
+					title: 'Connect to Google Drive',
+					message:
+						'Connecting here can replace refresh tokens used by other vaults. ' +
+						'If this vault should use the same account, open settings and import the existing refresh token with save and validate. Continue?',
+					confirmText: 'Connect anyway',
+					cancelText: 'Cancel',
+					warning: true,
+				});
+				if (!shouldContinue) {
 					return;
 				}
 

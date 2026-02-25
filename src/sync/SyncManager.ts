@@ -246,6 +246,7 @@ const TRANSFER_CONCURRENCY = 3;
 export class SyncManager {
 	private static readonly FILE_OPEN_REFRESH_COOLDOWN_MS = 1500;
 	private static readonly SETTINGS_SKIP_NOTICE_COOLDOWN_MS = 5 * 60 * 1000;
+	private static readonly AUTH_REQUIRED_NOTICE_COOLDOWN_MS = 5 * 60 * 1000;
 
 	private syncLock = false;
 	private pushFlushInFlight = false;
@@ -272,8 +273,12 @@ export class SyncManager {
 	private uploadsBlockedByStorageQuota = false;
 	private shuttingDown = false;
 	private readonly storageQuotaStatusMessage = 'Google Drive storage is full. Uploads are paused.';
+	private readonly authRequiredStatusMessage = 'Re-authentication required.';
+	private readonly authRequiredNoticeMessage =
+		'Google account access expired. Open plugin settings and select re-authenticate, or paste and validate a refresh token.';
 	private lastSettingsSkipNoticeAt = 0;
 	private lastSettingsSkipNoticeFingerprint = '';
+	private lastAuthRequiredNoticeAt = 0;
 
 	readonly syncDb: SyncDatabase;
 	readonly snapshotManager: SnapshotManager;
@@ -385,6 +390,21 @@ export class SyncManager {
 		await this.syncDb.ensureLoaded();
 	}
 
+	private ensureAuthReadyForSyncEntry(): boolean {
+		if (this.plugin.settings.refreshToken && !this.plugin.settings.needsReauthentication) {
+			return true;
+		}
+
+		this.errorAlertMessage = this.authRequiredNoticeMessage;
+		this.statusBar.setError(this.authRequiredStatusMessage);
+		const now = Date.now();
+		if (now - this.lastAuthRequiredNoticeAt >= SyncManager.AUTH_REQUIRED_NOTICE_COOLDOWN_MS) {
+			this.lastAuthRequiredNoticeAt = now;
+			new Notice(this.authRequiredNoticeMessage, 12000);
+		}
+		return false;
+	}
+
 	private handleStorageQuotaExceeded(): void {
 		if (this.uploadsBlockedByStorageQuota) {
 			this.statusBar.setStorageFull();
@@ -424,6 +444,9 @@ export class SyncManager {
 
 		if (!this.plugin.settings.setupComplete || !this.plugin.settings.gDriveFolderId) {
 			new Notice('Complete Google Drive setup first.');
+			return null;
+		}
+		if (!this.ensureAuthReadyForSyncEntry()) {
 			return null;
 		}
 		await this.ensureSyncDbReady();
@@ -547,6 +570,9 @@ export class SyncManager {
 			new Notice('Complete Google Drive setup first.');
 			return null;
 		}
+		if (!this.ensureAuthReadyForSyncEntry()) {
+			return null;
+		}
 		await this.ensureSyncDbReady();
 		if (this.uploadsBlockedByStorageQuota) {
 			this.statusBar.setStorageFull();
@@ -624,6 +650,9 @@ export class SyncManager {
 			new Notice('Complete Google Drive setup first.');
 			return null;
 		}
+		if (!this.ensureAuthReadyForSyncEntry()) {
+			return null;
+		}
 		await this.ensureSyncDbReady();
 
 		const canSync = await this.refreshConnectivityState(true);
@@ -665,6 +694,9 @@ export class SyncManager {
 		progress?: (message: string) => void,
 		shouldCancel?: () => boolean
 	): Promise<SyncSummary | null> {
+		if (!this.ensureAuthReadyForSyncEntry()) {
+			return null;
+		}
 		if (shouldCancel?.()) {
 			return null;
 		}
@@ -689,7 +721,6 @@ export class SyncManager {
 	}
 
 	async previewFullResync(): Promise<FullResyncPreview> {
-		await this.ensureSyncDbReady();
 		if (!this.plugin.settings.gDriveFolderId) {
 			return {
 				uploads: 0,
@@ -699,6 +730,10 @@ export class SyncManager {
 				remoteFiles: 0,
 			};
 		}
+		if (!this.ensureAuthReadyForSyncEntry()) {
+			throw new Error(this.authRequiredStatusMessage);
+		}
+		await this.ensureSyncDbReady();
 
 		const [localByPath, remoteByPath] = await Promise.all([
 			this.collectLocalHashesForPreview(),

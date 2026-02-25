@@ -102,7 +102,7 @@ Before using **Connect to Google Drive**, create a desktop OAuth client in Googl
 Mobile auth uses a refresh-token import flow.
 
 1. On desktop, copy the refresh token from plugin settings.
-2. On mobile, paste it into **Add refresh token**.
+2. On mobile, paste it into **Refresh token** and select **Save and validate**.
 3. Complete folder setup if prompted.
 
 ## Commands
@@ -137,6 +137,16 @@ The plugin uses `drive.file`, so it primarily sees files created via this plugin
 
 No. Selective sync options (file types, excluded folders, max size, and related behavior) are device-local by design.
 
+### How should I connect multiple vaults with the same Google account?
+
+Use one shared refresh token for that Google account and OAuth client on the same device:
+
+1. Connect the first vault with **Connect to Google Drive**.
+2. In each additional vault, open **Settings → GDrive Sync**, paste the same refresh token, then select **Save and validate**.
+3. Avoid running **Connect to Google Drive** again unless you intentionally want a new token.
+
+If a vault creates a new refresh token, older vault tokens can be revoked and those vaults will need re-authentication or token re-import.
+
 ### Is this the same as Obsidian Sync history?
 
 No. History here is based on Google Drive revisions, not Obsidian Sync snapshots.
@@ -160,6 +170,7 @@ Unsafe and transient files (for example workspace and cache files) are intention
 ## Troubleshooting
 
 - If setup does not start, run **Open settings** and reconnect account.
+- If re-authentication is required after connecting another vault, paste the latest refresh token in **Settings → GDrive Sync** and select **Save and validate**, or use **Re-authenticate**.
 - If uploads are paused due to storage full, run **Resume uploads after storage warning** after freeing space.
 - If sync appears stalled, check **View activity log** for conflict/error entries.
 - If local and remote drift after major changes, run **Force full re-sync** from **Settings → GDrive Sync → Advanced**.
