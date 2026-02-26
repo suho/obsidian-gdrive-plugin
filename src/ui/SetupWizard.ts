@@ -227,7 +227,7 @@ export class SetupWizard extends Modal {
 		if (Platform.isMobile) {
 			new Setting(this.contentEl)
 				.setName('Connect on mobile')
-				.setDesc('Open plugin settings, paste a refresh token, then select save and validate.')
+				.setDesc('Open plugin settings and paste a refresh token. It validates automatically.')
 				.addButton(btn =>
 					btn
 						.setButtonText('Open settings')
@@ -284,7 +284,7 @@ export class SetupWizard extends Modal {
 					title: 'Connect to Google Drive',
 					message:
 						'Connecting here can replace refresh tokens used by other vaults. ' +
-						'If this vault should use the same account, open settings and import the existing refresh token with save and validate. Continue?',
+						'If this vault should use the same account, open settings and paste the existing refresh token so it validates automatically. Continue?',
 					confirmText: 'Connect anyway',
 					cancelText: 'Cancel',
 					warning: true,

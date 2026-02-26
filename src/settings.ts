@@ -129,6 +129,9 @@ export const DEFAULT_SETTINGS: GDrivePluginSettings = {
 
 export class GDriveSettingTab extends PluginSettingTab {
 	plugin: GDriveSyncPlugin;
+	private refreshTokenValidationTimer: ReturnType<typeof setTimeout> | null = null;
+	private refreshTokenValidationSeq = 0;
+	private lastValidatedRefreshToken = '';
 
 	constructor(app: App, plugin: GDriveSyncPlugin) {
 		super(app, plugin);
@@ -170,70 +173,43 @@ export class GDriveSettingTab extends PluginSettingTab {
 			});
 
 		let refreshTokenDraft = this.plugin.settings.refreshToken;
-		let refreshTokenField: { setValue: (value: string) => unknown } | null = null;
+		this.lastValidatedRefreshToken = this.plugin.settings.refreshToken;
 		new Setting(containerEl)
 			.setName('Refresh token')
 			.setDesc(
 				Platform.isMobile
-					? 'Paste or update the refresh token for this device, then select save and validate.'
-					: 'Paste a refresh token from another vault, then select save and validate.'
+					? 'Paste or update the refresh token for this device. It validates automatically.'
+					: 'Paste a refresh token from another vault. It validates automatically.'
 			)
 			.addText(text => {
-				refreshTokenField = text;
 				text
 					.setPlaceholder('Paste refresh token')
 					.setValue(refreshTokenDraft)
 					.onChange(value => {
 						refreshTokenDraft = value;
+						this.scheduleRefreshTokenValidation(refreshTokenDraft);
 					});
-			})
-			.addButton(btn =>
-				btn
-					.setButtonText('Save and validate')
-					.setCta()
-					.onClick(() => {
-						void (async () => {
-							btn.setDisabled(true);
-							try {
-								await this.plugin.authManager.importRefreshToken(refreshTokenDraft);
-								refreshTokenDraft = this.plugin.settings.refreshToken;
-								refreshTokenField?.setValue(refreshTokenDraft);
-								const connectedEmail = this.plugin.settings.connectedEmail;
-								new Notice(
-									connectedEmail ? `Connected as ${connectedEmail}` : 'Refresh token saved and validated.'
-								);
-								this.display();
-							} catch (err) {
-								new Notice(
-									`Could not validate refresh token: ${err instanceof Error ? err.message : String(err)}`,
-									12000
-								);
-							} finally {
-								btn.setDisabled(false);
-							}
-						})();
-					})
-			);
+			});
 
-			if (this.plugin.settings.needsReauthentication) {
-				if (Platform.isMobile) {
-					new Setting(containerEl)
-						.setName('Re-authentication required')
-						.setDesc('Google account access expired. This token may have been replaced in another vault.');
-				} else {
-					new Setting(containerEl)
-						.setName('Re-authentication required')
-						.setDesc('Google account access expired. This token may have been replaced in another vault.')
-						.addButton(btn =>
-							btn
-								.setButtonText('Re-authenticate')
-								.setCta()
-								.onClick(() => {
-									this.plugin.openSetupWizard();
-								})
-						);
-				}
+		if (this.plugin.settings.needsReauthentication) {
+			if (Platform.isMobile) {
+				new Setting(containerEl)
+					.setName('Re-authentication required')
+					.setDesc('Google account access expired. This token may have been replaced in another vault.');
+			} else {
+				new Setting(containerEl)
+					.setName('Re-authentication required')
+					.setDesc('Google account access expired. This token may have been replaced in another vault.')
+					.addButton(btn =>
+						btn
+							.setButtonText('Re-authenticate')
+							.setCta()
+							.onClick(() => {
+								this.plugin.openSetupWizard();
+							})
+					);
 			}
+		}
 
 		// ── Account ──────────────────────────────────────────────────
 		new Setting(containerEl).setName('Account').setHeading();
@@ -744,6 +720,55 @@ export class GDriveSettingTab extends PluginSettingTab {
 		progress.value = Math.max(0, Math.min(100, percent));
 		progress.setAttribute('aria-label', label);
 		return progress;
+	}
+
+	private scheduleRefreshTokenValidation(candidateToken: string): void {
+		const normalized = candidateToken.trim();
+		if (this.refreshTokenValidationTimer !== null) {
+			clearTimeout(this.refreshTokenValidationTimer);
+			this.refreshTokenValidationTimer = null;
+		}
+
+		if (!normalized || normalized.length < 20) {
+			return;
+		}
+
+		const seq = ++this.refreshTokenValidationSeq;
+		this.refreshTokenValidationTimer = setTimeout(() => {
+			void (async () => {
+				if (seq !== this.refreshTokenValidationSeq) {
+					return;
+				}
+				if (
+					normalized === this.lastValidatedRefreshToken &&
+					!this.plugin.settings.needsReauthentication
+				) {
+					return;
+				}
+
+				try {
+					await this.plugin.authManager.importRefreshToken(normalized);
+					if (seq !== this.refreshTokenValidationSeq) {
+						return;
+					}
+
+					this.lastValidatedRefreshToken = this.plugin.settings.refreshToken;
+					const connectedEmail = this.plugin.settings.connectedEmail;
+					new Notice(
+						connectedEmail ? `Connected as ${connectedEmail}` : 'Refresh token saved and validated.'
+					);
+					this.display();
+				} catch (err) {
+					if (seq !== this.refreshTokenValidationSeq) {
+						return;
+					}
+					new Notice(
+						`Could not validate refresh token: ${err instanceof Error ? err.message : String(err)}`,
+						12000
+					);
+				}
+			})();
+		}, 700);
 	}
 
 	private async updateSelectiveSyncSettings(update: () => void, refreshAfterSave = false): Promise<void> {

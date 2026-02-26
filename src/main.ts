@@ -244,7 +244,7 @@ export default class GDriveSyncPlugin extends Plugin {
 
 	openSetupWizard(): void {
 		if (Platform.isMobile && !this.settings.refreshToken) {
-			new Notice('Add a refresh token in plugin settings, then select save and validate.');
+			new Notice('Add a refresh token in plugin settings. It validates automatically.');
 			this.openPluginSettings();
 			return;
 		}
@@ -259,7 +259,7 @@ export default class GDriveSyncPlugin extends Plugin {
 	async syncNow(): Promise<void> {
 		if (!this.settings.setupComplete) {
 			if (Platform.isMobile && !this.settings.refreshToken) {
-				new Notice('Add a refresh token in plugin settings, then select save and validate.');
+				new Notice('Add a refresh token in plugin settings. It validates automatically.');
 				this.openPluginSettings();
 			} else {
 				new Notice('Complete Google Drive setup first.');
