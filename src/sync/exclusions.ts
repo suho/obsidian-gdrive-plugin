@@ -30,6 +30,12 @@ type SelectiveSettings = Pick<
 	| 'syncCommunityPluginList'
 >;
 
+export interface ExclusionDescriptionContext {
+	userExclusions?: string[];
+	settings?: SelectiveSettings;
+	fileSizeBytes?: number;
+}
+
 const IMAGE_EXTENSIONS = new Set([
 	'png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg', 'heic', 'heif', 'tif', 'tiff',
 ]);
@@ -76,6 +82,20 @@ function extensionFor(path: string): string {
 	const dotIndex = fileName.lastIndexOf('.');
 	if (dotIndex < 0) return '';
 	return fileName.slice(dotIndex + 1).toLowerCase();
+}
+
+function formatByteSize(bytes: number): string {
+	if (!Number.isFinite(bytes) || bytes <= 0) {
+		return '0 B';
+	}
+	const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+	let value = bytes;
+	let unitIndex = 0;
+	while (value >= 1024 && unitIndex < units.length - 1) {
+		value /= 1024;
+		unitIndex += 1;
+	}
+	return `${value.toFixed(unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
 }
 
 function isWithinConfigDir(path: string, configDir: string): boolean {
@@ -153,6 +173,24 @@ function matchesUserExclusion(path: string, rawExclusion: string): boolean {
 	return normalizedPath === exclusion || normalizedPath.startsWith(`${exclusion}/`);
 }
 
+function matchedUserExclusion(path: string, userExclusions: string[]): string | null {
+	const normalizedPath = normalize(path);
+	let bestMatch = '';
+	for (const exclusion of userExclusions) {
+		const normalizedExclusion = normalizePrefix(exclusion);
+		if (!normalizedExclusion) {
+			continue;
+		}
+		if (
+			(normalizedPath === normalizedExclusion || normalizedPath.startsWith(`${normalizedExclusion}/`)) &&
+			normalizedExclusion.length > bestMatch.length
+		) {
+			bestMatch = normalizedExclusion;
+		}
+	}
+	return bestMatch || null;
+}
+
 function typeExclusionReason(path: string, settings: SelectiveSettings): ExclusionReason | null {
 	const type = classifyFileType(path);
 	if (type === 'image' && !settings.syncImages) return 'type-disabled';
@@ -211,31 +249,80 @@ export function toUserAdjustableSkipReason(reason: ExclusionReason): UserAdjusta
 	return null;
 }
 
-export function describeUserAdjustableExclusionReason(path: string, reason: ExclusionReason, configDir: string): string | null {
+export function describeUserAdjustableExclusionReason(
+	path: string,
+	reason: ExclusionReason,
+	configDir: string,
+	context: ExclusionDescriptionContext = {}
+): string | null {
 	if (reason === 'excluded-folder') {
-		return 'Path is in an excluded folder.';
+		const matchedExclusion = context.userExclusions ? matchedUserExclusion(path, context.userExclusions) : null;
+		if (matchedExclusion) {
+			return `Path matches excluded folder "${matchedExclusion}".`;
+		}
+		return 'Path matches an excluded folder rule.';
 	}
 	if (reason === 'file-too-large') {
-		return 'File is larger than max file size.';
+		const maxSizeBytes = context.settings?.maxFileSizeBytes;
+		const fileSizeBytes = context.fileSizeBytes;
+		if (
+			typeof fileSizeBytes === 'number' &&
+			fileSizeBytes > 0 &&
+			typeof maxSizeBytes === 'number' &&
+			maxSizeBytes > 0
+		) {
+			return `File size is ${formatByteSize(fileSizeBytes)} and exceeds the max file size of ${formatByteSize(maxSizeBytes)}.`;
+		}
+		if (typeof maxSizeBytes === 'number' && maxSizeBytes > 0) {
+			return `File is larger than the max file size setting (${formatByteSize(maxSizeBytes)}).`;
+		}
+		return 'File is larger than the max file size setting.';
 	}
 	if (reason === 'type-disabled') {
 		const type = classifyFileType(path);
-		if (type === 'image') return 'Image file sync is turned off.';
-		if (type === 'audio') return 'Audio file sync is turned off.';
-		if (type === 'video') return 'Video file sync is turned off.';
-		if (type === 'pdf') return 'PDF file sync is turned off.';
-		return 'Other file type sync is turned off.';
+		const extension = extensionFor(path);
+		if (type === 'image') {
+			return extension
+				? `Image file type (.${extension}) is disabled by Sync images.`
+				: 'Image file sync is disabled by Sync images.';
+		}
+		if (type === 'audio') {
+			return extension
+				? `Audio file type (.${extension}) is disabled by Sync audio.`
+				: 'Audio file sync is disabled by Sync audio.';
+		}
+		if (type === 'video') {
+			return extension
+				? `Video file type (.${extension}) is disabled by Sync video.`
+				: 'Video file sync is disabled by Sync video.';
+		}
+		if (type === 'pdf') {
+			return 'PDF files are disabled by Sync PDF files.';
+		}
+		return extension
+			? `File type (.${extension}) is disabled by Sync other file types.`
+			: 'Files without a known media type are disabled by Sync other file types.';
 	}
 	if (reason === 'vault-config-disabled') {
 		const relativePath = relativeConfigPath(path, configDir);
-		if (relativePath === 'app.json') return 'Editor settings sync is turned off.';
-		if (relativePath === 'appearance.json') return 'Appearance sync is turned off.';
-		if (relativePath === 'hotkeys.json') return 'Hotkeys sync is turned off.';
-		if (relativePath === 'community-plugins.json') return 'Community plugin list sync is turned off.';
-		if (relativePath?.startsWith('themes/') || relativePath?.startsWith('snippets/')) {
-			return 'Appearance sync is turned off.';
+		const normalizedConfigDir = normalizePrefix(configDir);
+		const configPathLabel = relativePath ? `${normalizedConfigDir}/${relativePath}` : normalize(path);
+		if (relativePath === 'app.json') {
+			return `Vault config file "${configPathLabel}" is disabled by Sync editor settings.`;
 		}
-		return 'Vault configuration sync for this file is turned off.';
+		if (relativePath === 'appearance.json') {
+			return `Vault config file "${configPathLabel}" is disabled by Sync appearance.`;
+		}
+		if (relativePath === 'hotkeys.json') {
+			return `Vault config file "${configPathLabel}" is disabled by Sync hotkeys.`;
+		}
+		if (relativePath === 'community-plugins.json') {
+			return `Vault config file "${configPathLabel}" is disabled by Sync community plugin list.`;
+		}
+		if (relativePath?.startsWith('themes/') || relativePath?.startsWith('snippets/')) {
+			return `Vault config path "${configPathLabel}" is disabled by Sync appearance.`;
+		}
+		return `Vault config path "${configPathLabel}" is disabled by vault configuration sync settings.`;
 	}
 	return null;
 }

@@ -1381,7 +1381,11 @@ export class SyncManager {
 			if (!mappedReason) {
 				return;
 			}
-			const reasonText = describeUserAdjustableExclusionReason(path, reason, this.plugin.app.vault.configDir);
+			const reasonText = describeUserAdjustableExclusionReason(path, reason, this.plugin.app.vault.configDir, {
+				userExclusions: this.plugin.settings.excludedPaths,
+				settings: this.plugin.settings,
+				fileSizeBytes,
+			});
 			if (!reasonText) {
 				return;
 			}
