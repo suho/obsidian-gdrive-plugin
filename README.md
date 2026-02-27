@@ -119,13 +119,13 @@ Mobile auth uses a refresh-token import flow.
 - `Open settings`
 - `Resume uploads after storage warning`
 - `Clean duplicate sync artifacts`
-- `Reset sync state`
+- `Force full re-sync`
 - `Connect to Google Drive` (desktop only)
 
 ## Maintenance actions
 
-- `Force full re-sync` is available in **Settings → GDrive Sync → Advanced** and runs a full local/remote comparison with a preview step.
-- `Reset sync state` is available as both a command and an Advanced settings action. It clears the local sync database and triggers a fresh comparison on the next sync.
+- `Force full re-sync` is available as both a command and an Advanced settings action.
+- It clears local sync state, then runs a full local/remote comparison with a preview step.
 
 ## FAQ
 
@@ -174,7 +174,7 @@ Unsafe and transient files (for example workspace and cache files) are intention
 - If uploads are paused due to storage full, run **Resume uploads after storage warning** after freeing space.
 - If sync appears stalled, check **View activity log** for conflict/error entries.
 - If local and remote drift after major changes, run **Force full re-sync** from **Settings → GDrive Sync → Advanced**.
-- If sync metadata seems corrupted, run **Reset sync state** (command or **Settings → GDrive Sync → Advanced**), then run **Sync now**.
+- If sync metadata seems corrupted, run **Force full re-sync** to clear local sync state and rebuild sync metadata.
 - If the target Drive folder was deleted manually, rerun setup from plugin settings.
 
 ## Development

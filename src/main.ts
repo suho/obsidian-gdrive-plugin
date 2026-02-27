@@ -191,9 +191,9 @@ export default class GDriveSyncPlugin extends Plugin {
 
 		this.addCommand({
 			id: 'reset-sync-state',
-			name: 'Reset sync state',
+			name: 'Force full re-sync',
 			callback: () => {
-				this.resetSyncState();
+				this.forceFullResync();
 			},
 		});
 	}
@@ -360,7 +360,7 @@ export default class GDriveSyncPlugin extends Plugin {
 		void (async () => {
 			const firstConfirm = await ConfirmModal.ask(this.app, {
 				title: 'Force full re-sync',
-				message: 'This will compare all local and remote files. Continue?',
+				message: 'This will clear local sync state, then compare all local and remote files. Continue?',
 				confirmText: 'Continue',
 				cancelText: 'Cancel',
 				warning: true,
@@ -403,8 +403,9 @@ export default class GDriveSyncPlugin extends Plugin {
 			});
 			let currentStep = 0;
 			progress.open();
-			progress.updateProgress(0, 'Preparing full sync...');
+			progress.updateProgress(0, 'Clearing local sync state...');
 			try {
+				await this.syncManager.resetSyncStateArtifacts();
 				const result = await this.syncManager.forceFullResync(
 					(message) => {
 						currentStep = Math.min(currentStep + 1, 8);
@@ -430,25 +431,6 @@ export default class GDriveSyncPlugin extends Plugin {
 				progress.finish();
 				new Notice(`Full re-sync failed: ${err instanceof Error ? err.message : String(err)}`, 12000);
 			}
-		})();
-	}
-
-	resetSyncState(): void {
-		void (async () => {
-			const confirmed = await ConfirmModal.ask(this.app, {
-				title: 'Reset sync state',
-				message: 'This will clear the sync database. All files will be re-compared on next sync. Continue?',
-				confirmText: 'Reset sync state',
-				cancelText: 'Cancel',
-				warning: true,
-			});
-			if (!confirmed) {
-				return;
-			}
-
-			await this.syncManager.resetSyncStateArtifacts();
-			new Notice('Sync state was reset. Running a fresh sync comparison.');
-			void this.syncNow();
 		})();
 	}
 

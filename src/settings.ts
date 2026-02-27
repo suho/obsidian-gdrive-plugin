@@ -574,26 +574,11 @@ export class GDriveSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName('Force full re-sync')
-			.setDesc('Compare all local and remote files and sync any differences.')
+			.setDesc('Clear local sync state, then compare all local and remote files and sync any differences.')
 			.addButton(btn =>
 				btn.setButtonText('Force re-sync').onClick(() => {
 					this.plugin.forceFullResync();
 				})
-			);
-
-		new Setting(containerEl)
-			.setName('Reset sync state')
-			.setDesc(
-				'Clears the local sync database. All files will be re-compared on next sync. ' +
-				'Use this to recover from a corrupted sync state.'
-			)
-			.addButton(btn =>
-				btn
-					.setButtonText('Reset')
-					.setWarning()
-					.onClick(() => {
-						this.plugin.resetSyncState();
-					})
 			);
 
 		new Setting(containerEl)
