@@ -364,6 +364,10 @@ If your plugin does not need CSS, delete this file.
 	word-break: break-word;
 }
 
+.gdrive-sync-progress-cancel {
+	margin-top: 10px;
+}
+
 .gdrive-sync-folder-list {
 	max-height: 320px;
 	overflow: auto;

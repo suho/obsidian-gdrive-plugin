@@ -62,6 +62,7 @@ export class ProgressModal extends Modal {
 		this.fileEl = this.contentEl.createDiv({ cls: 'gdrive-sync-progress-file' });
 
 		const cancelButton = this.contentEl.createEl('button', { text: 'Cancel' });
+		cancelButton.addClass('gdrive-sync-progress-cancel');
 		cancelButton.addClass('mod-warning');
 		cancelButton.addEventListener('click', () => {
 			if (this.cancelled) {
