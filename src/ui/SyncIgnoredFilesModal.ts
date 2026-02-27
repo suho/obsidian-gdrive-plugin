@@ -8,6 +8,8 @@ export class SyncIgnoredFilesModal extends Modal {
 	private error = '';
 	private remoteWarning = '';
 	private query = '';
+	private summaryEl: HTMLParagraphElement | null = null;
+	private tableBodyEl: HTMLTableSectionElement | null = null;
 
 	constructor(app: App, private readonly plugin: GDriveSyncPlugin) {
 		super(app);
@@ -51,8 +53,35 @@ export class SyncIgnoredFilesModal extends Modal {
 		);
 	}
 
+	private renderVisibleEntries(): void {
+		if (!this.summaryEl || !this.tableBodyEl) {
+			return;
+		}
+
+		const visible = this.visibleEntries();
+		this.summaryEl.setText(`Showing ${visible.length} ignored files.`);
+		this.tableBodyEl.empty();
+
+		if (visible.length === 0) {
+			const row = this.tableBodyEl.insertRow();
+			row.insertCell().setText('No ignored files found.');
+			row.insertCell();
+			row.insertCell();
+			return;
+		}
+
+		for (const entry of visible) {
+			const row = this.tableBodyEl.insertRow();
+			row.insertCell().setText(entry.path);
+			row.insertCell().setText(entry.source === 'local' ? 'Local' : 'Remote');
+			row.insertCell().setText(entry.reasonText);
+		}
+	}
+
 	private render(): void {
 		this.contentEl.empty();
+		this.summaryEl = null;
+		this.tableBodyEl = null;
 
 		if (this.loading) {
 			this.contentEl.createEl('p', { text: 'Loading ignored files...' });
@@ -81,15 +110,14 @@ export class SyncIgnoredFilesModal extends Modal {
 		search.value = this.query;
 		search.addEventListener('input', () => {
 			this.query = search.value;
-			this.render();
+			this.renderVisibleEntries();
 		});
 
 		if (this.remoteWarning) {
 			this.contentEl.createEl('p', { text: this.remoteWarning, cls: 'gdrive-sync-error' });
 		}
 
-		const visible = this.visibleEntries();
-		this.contentEl.createEl('p', { text: `Showing ${visible.length} ignored files.` });
+		this.summaryEl = this.contentEl.createEl('p');
 
 		const table = this.contentEl.createEl('table', { cls: 'gdrive-sync-table' });
 		const header = table.createTHead().insertRow();
@@ -97,19 +125,7 @@ export class SyncIgnoredFilesModal extends Modal {
 		header.insertCell().setText('Source');
 		header.insertCell().setText('Reason');
 
-		const body = table.createTBody();
-		for (const entry of visible) {
-			const row = body.insertRow();
-			row.insertCell().setText(entry.path);
-			row.insertCell().setText(entry.source === 'local' ? 'Local' : 'Remote');
-			row.insertCell().setText(entry.reasonText);
-		}
-
-		if (visible.length === 0) {
-			const row = body.insertRow();
-			row.insertCell().setText('No ignored files found.');
-			row.insertCell();
-			row.insertCell();
-		}
+		this.tableBodyEl = table.createTBody();
+		this.renderVisibleEntries();
 	}
 }
