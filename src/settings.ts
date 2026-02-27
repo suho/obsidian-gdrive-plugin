@@ -1,5 +1,7 @@
 import { App, Notice, Platform, PluginSettingTab, Setting } from 'obsidian';
 import type GDriveSyncPlugin from './main';
+import type { ActivityLogClearRange } from './sync/SyncManager';
+import { ConfirmModal } from './ui/ConfirmModal';
 import { ExcludedFoldersModal } from './ui/ExcludedFoldersModal';
 
 function formatStorageBytes(bytes: number): string {
@@ -557,6 +559,28 @@ export class GDriveSettingTab extends PluginSettingTab {
 			);
 
 		new Setting(containerEl)
+			.setName('Clear activity log')
+			.setDesc('Remove activity entries from the selected time range.')
+			.addButton(btn =>
+				btn.setButtonText('Clear 1 day').onClick(() => {
+					void this.clearActivityLogEntries('1-day');
+				})
+			)
+			.addButton(btn =>
+				btn.setButtonText('Clear 1 week').onClick(() => {
+					void this.clearActivityLogEntries('1-week');
+				})
+			)
+			.addButton(btn =>
+				btn
+					.setButtonText('Clear all')
+					.setWarning()
+					.onClick(() => {
+						void this.clearActivityLogEntries('all');
+					})
+			);
+
+		new Setting(containerEl)
 			.setName('View deleted files')
 			.addButton(btn =>
 				btn.setButtonText('Open').onClick(() => {
@@ -767,6 +791,32 @@ export class GDriveSettingTab extends PluginSettingTab {
 		if (refreshAfterSave) {
 			this.display();
 		}
+	}
+
+	private async clearActivityLogEntries(range: ActivityLogClearRange): Promise<void> {
+		const label = range === '1-day'
+			? 'the last 1 day'
+			: range === '1-week'
+				? 'the last 1 week'
+				: 'all entries';
+		const confirmed = await ConfirmModal.ask(this.app, {
+			title: 'Clear activity log',
+			message: `This will clear activity log entries from ${label}. Continue?`,
+			confirmText: 'Clear',
+			cancelText: 'Cancel',
+			warning: true,
+		});
+		if (!confirmed) {
+			return;
+		}
+
+		const result = await this.plugin.syncManager.clearActivityLogEntries(range);
+		if (result.removed === 0) {
+			new Notice('No activity log entries were cleared.');
+			return;
+		}
+
+		new Notice(`Cleared ${result.removed} activity log entries.`);
 	}
 
 	private async exportDebugInfo(): Promise<void> {

@@ -69,6 +69,8 @@ export interface SyncIgnoredFilesSnapshot {
 	remoteWarning: string;
 }
 
+export type ActivityLogClearRange = '1-day' | '1-week' | 'all';
+
 interface OfflineQueuePayload {
 	version: number;
 	updatedAt: number;
@@ -2212,6 +2214,34 @@ export class SyncManager {
 
 	getAllActivityEntries(): ActivityLogEntry[] {
 		return this.activityLog.map(entry => ({ ...entry }));
+	}
+
+	async clearActivityLogEntries(range: ActivityLogClearRange): Promise<{ removed: number; remaining: number }> {
+		const before = this.activityLog.length;
+		if (before === 0) {
+			return { removed: 0, remaining: 0 };
+		}
+
+		const now = Date.now();
+		if (range === 'all') {
+			this.activityLog.length = 0;
+		} else {
+			const rangeMs = range === '1-day' ? 24 * 60 * 60 * 1000 : 7 * 24 * 60 * 60 * 1000;
+			const cutoff = now - rangeMs;
+			const keptEntries = this.activityLog.filter(entry => entry.timestamp < cutoff);
+			this.activityLog.length = 0;
+			this.activityLog.push(...keptEntries);
+		}
+
+		const removed = before - this.activityLog.length;
+		if (removed === 0) {
+			return { removed: 0, remaining: this.activityLog.length };
+		}
+
+		this.rebuildConflictAlertsFromActivityLog();
+		this.updateStatusFromCurrentState();
+		await this.persistActivityLog();
+		return { removed, remaining: this.activityLog.length };
 	}
 
 	addActivityEntry(entry: ActivityLogEntry): void {

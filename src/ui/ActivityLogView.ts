@@ -62,6 +62,8 @@ export class ActivityLogView extends ItemView {
 	private filter: ActivityLogFilter = 'all';
 	private query = '';
 	private lastRenderedSignature = '';
+	private filterButtons = new Map<ActivityLogFilter, HTMLButtonElement>();
+	private listEl: HTMLElement | null = null;
 
 	constructor(leaf: WorkspaceLeaf, private readonly plugin: GDriveSyncPlugin) {
 		super(leaf);
@@ -93,6 +95,8 @@ export class ActivityLogView extends ItemView {
 
 	async onClose(): Promise<void> {
 		this.contentEl.empty();
+		this.filterButtons.clear();
+		this.listEl = null;
 	}
 
 	private renderIfChanged(): void {
@@ -105,19 +109,29 @@ export class ActivityLogView extends ItemView {
 	}
 
 	private render(): void {
+		this.ensureLayout();
+		this.updateFilterButtons();
+		this.renderEntries();
+	}
+
+	private ensureLayout(): void {
+		if (this.listEl) {
+			return;
+		}
+
 		this.contentEl.empty();
 		this.contentEl.addClass('gdrive-sync-activity-view');
 		const controls = this.contentEl.createDiv({ cls: 'gdrive-sync-activity-controls' });
 		const filterRow = controls.createDiv({ cls: 'gdrive-sync-activity-filters' });
+		this.filterButtons.clear();
 		for (const option of FILTER_OPTIONS) {
-			const button = filterRow.createEl('button', {
-				text: option.label,
-				cls: option.value === this.filter ? 'mod-cta' : '',
-			});
+			const button = filterRow.createEl('button', { text: option.label });
 			button.addEventListener('click', () => {
 				this.filter = option.value;
-				this.render();
+				this.updateFilterButtons();
+				this.renderEntries();
 			});
+			this.filterButtons.set(option.value, button);
 		}
 
 		new Setting(controls)
@@ -128,20 +142,33 @@ export class ActivityLogView extends ItemView {
 					.setValue(this.query)
 					.onChange(value => {
 						this.query = value;
-						this.render();
+						this.renderEntries();
 					});
 			});
 
-		const list = this.contentEl.createDiv({ cls: 'gdrive-sync-activity-list' });
+		this.listEl = this.contentEl.createDiv({ cls: 'gdrive-sync-activity-list' });
+	}
+
+	private updateFilterButtons(): void {
+		for (const [value, button] of this.filterButtons) {
+			button.toggleClass('mod-cta', value === this.filter);
+		}
+	}
+
+	private renderEntries(): void {
+		if (!this.listEl) {
+			return;
+		}
+		this.listEl.empty();
 		const entries = this.filteredEntries();
 		if (entries.length === 0) {
-			list.createEl('p', { text: 'No activity entries match the current filter.' });
+			this.listEl.createEl('p', { text: 'No activity entries match the current filter.' });
 			this.lastRenderedSignature = `0:${this.filter}:${this.query}`;
 			return;
 		}
 
 		for (const entry of entries) {
-			this.renderEntry(list, entry);
+			this.renderEntry(this.listEl, entry);
 		}
 
 		this.lastRenderedSignature = `${entries.length}:${entries[0]?.id ?? ''}:${this.filter}:${this.query}`;
@@ -200,6 +227,7 @@ export class ActivityLogView extends ItemView {
 export class ActivityLogModal extends Modal {
 	private filter: ActivityLogFilter;
 	private query = '';
+	private listEl: HTMLElement | null = null;
 
 	constructor(
 		app: App,
@@ -217,9 +245,19 @@ export class ActivityLogModal extends Modal {
 
 	onClose(): void {
 		this.contentEl.empty();
+		this.listEl = null;
 	}
 
 	private render(): void {
+		this.ensureLayout();
+		this.renderEntries();
+	}
+
+	private ensureLayout(): void {
+		if (this.listEl) {
+			return;
+		}
+
 		this.contentEl.empty();
 		const controls = this.contentEl.createDiv({ cls: 'gdrive-sync-activity-controls' });
 		new Setting(controls)
@@ -231,7 +269,7 @@ export class ActivityLogModal extends Modal {
 				drop.setValue(this.filter);
 				drop.onChange(value => {
 					this.filter = value as ActivityLogFilter;
-					this.render();
+					this.renderEntries();
 				});
 			})
 			.addSearch(search => {
@@ -240,20 +278,27 @@ export class ActivityLogModal extends Modal {
 					.setValue(this.query)
 					.onChange(value => {
 						this.query = value;
-						this.render();
+						this.renderEntries();
 					});
 			});
 
+		this.listEl = this.contentEl.createDiv({ cls: 'gdrive-sync-activity-list' });
+	}
+
+	private renderEntries(): void {
+		if (!this.listEl) {
+			return;
+		}
+		this.listEl.empty();
 		const entries = sortedEntries(this.plugin.syncManager.getAllActivityEntries())
 			.filter(entry => matchesFilter(entry, this.filter) && matchesSearch(entry, this.query));
-		const list = this.contentEl.createDiv({ cls: 'gdrive-sync-activity-list' });
 		if (entries.length === 0) {
-			list.createEl('p', { text: 'No matching entries.' });
+			this.listEl.createEl('p', { text: 'No matching entries.' });
 			return;
 		}
 
 		for (const entry of entries.slice(0, Platform.isMobile ? 120 : 250)) {
-			const row = list.createDiv({ cls: 'gdrive-sync-activity-entry' });
+			const row = this.listEl.createDiv({ cls: 'gdrive-sync-activity-entry' });
 			const title = `${iconForAction(entry.action)} ${new Date(entry.timestamp).toLocaleString()} · ${labelForAction(entry.action)}`;
 			row.createDiv({ text: title });
 			row.createDiv({ cls: 'gdrive-sync-activity-path', text: entry.path });
