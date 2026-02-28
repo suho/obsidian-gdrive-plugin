@@ -1,7 +1,7 @@
 {
 	"id": "gdrive-sync",
 	"name": "GDrive Sync",
-	"version": "0.24.0",
+	"version": "0.25.0",
 	"minAppVersion": "0.15.0",
 	"description": "Sync your vaults with Google Drive on cross-platforms (macOS, iOS, Android) with better UX.",
 	"author": "Su Ho",
