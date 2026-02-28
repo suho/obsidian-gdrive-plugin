@@ -1869,6 +1869,9 @@ export class SyncManager {
 
 	private async applyRemoteChange(change: DriveChange, options?: PullChangesOptions): Promise<boolean> {
 		const before = this.syncDb.getByGDriveId(change.fileId);
+		if (!change.removed && before && this.hasQueuedLocalDelete(before.localPath)) {
+			return false;
+		}
 		const result = await this.downloadManager.applyChange(change, {
 			allowActiveWrite: options?.allowActiveWrite,
 		});
@@ -2092,6 +2095,23 @@ export class SyncManager {
 
 		for (const entry of this.offlineQueue) {
 			if (entry.path === normalizedPath || entry.oldPath === normalizedPath) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	private hasQueuedLocalDelete(path: string): boolean {
+		const normalizedPath = normalizePath(path);
+		for (const entry of this.pendingPushQueue) {
+			if (entry.action === 'delete' && entry.path === normalizedPath) {
+				return true;
+			}
+		}
+
+		for (const entry of this.offlineQueue) {
+			if (entry.action === 'delete' && entry.path === normalizedPath) {
 				return true;
 			}
 		}
