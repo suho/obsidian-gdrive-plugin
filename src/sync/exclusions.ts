@@ -28,6 +28,8 @@ type SelectiveSettings = Pick<
 	| 'syncAppearance'
 	| 'syncHotkeys'
 	| 'syncCommunityPluginList'
+	| 'syncCorePluginSettings'
+	| 'syncCommunityPluginFiles'
 >;
 
 export interface ExclusionDescriptionContext {
@@ -44,6 +46,19 @@ const AUDIO_EXTENSIONS = new Set([
 ]);
 const VIDEO_EXTENSIONS = new Set([
 	'mp4', 'mov', 'mkv', 'webm', 'avi', 'm4v',
+]);
+const CORE_PLUGIN_SETTINGS_FILES = new Set([
+	'core-plugins.json',
+	'daily-notes.json',
+	'templates.json',
+	'types.json',
+	'zk-prefixer.json',
+]);
+const COMMUNITY_PLUGIN_SYNC_FILES = new Set([
+	'manifest.json',
+	'data.json',
+	'styles.css',
+	'main.js',
 ]);
 
 export function emptyUserAdjustableSkipCounts(): UserAdjustableSkipCounts {
@@ -111,11 +126,25 @@ function relativeConfigPath(path: string, configDir: string): string | null {
 	return normalizedPath.slice(normalizedConfigDir.length + 1);
 }
 
+function isCorePluginSettingsPath(relativePath: string): boolean {
+	return CORE_PLUGIN_SETTINGS_FILES.has(relativePath);
+}
+
+function isCommunityPluginAssetPath(relativePath: string): boolean {
+	const segments = relativePath.split('/');
+	if (segments.length !== 3) return false;
+	if (segments[0] !== 'plugins') return false;
+	if (!segments[1]) return false;
+	return COMMUNITY_PLUGIN_SYNC_FILES.has(segments[2] ?? '');
+}
+
 function isAllowedVaultConfigPath(relativePath: string, settings: SelectiveSettings): boolean {
 	if (relativePath === 'app.json') return settings.syncEditorSettings;
 	if (relativePath === 'appearance.json') return settings.syncAppearance;
 	if (relativePath === 'hotkeys.json') return settings.syncHotkeys;
 	if (relativePath === 'community-plugins.json') return settings.syncCommunityPluginList;
+	if (isCorePluginSettingsPath(relativePath)) return settings.syncCorePluginSettings;
+	if (isCommunityPluginAssetPath(relativePath)) return settings.syncCommunityPluginFiles;
 	if (relativePath.startsWith('themes/') || relativePath.startsWith('snippets/')) return settings.syncAppearance;
 	return false;
 }
@@ -148,7 +177,6 @@ export function isHardExcluded(path: string, configDir: string): boolean {
 	if (lower === `${configDirLower}/workspace.json`) return true;
 	if (lower === `${configDirLower}/workspace-mobile.json`) return true;
 	if (lower.includes('/plugins/') && lower.includes('/snapshots/')) return true;
-	if (lower.startsWith(`${configDirLower}/plugins/`) && lower.endsWith('/main.js')) return true;
 
 	const segments = normalized.split('/');
 	const configDirSegments = normalizedConfigDir.split('/');
@@ -318,6 +346,12 @@ export function describeUserAdjustableExclusionReason(
 		}
 		if (relativePath === 'community-plugins.json') {
 			return `Vault config file "${configPathLabel}" is disabled by Sync community plugin list.`;
+		}
+		if (relativePath && isCorePluginSettingsPath(relativePath)) {
+			return `Vault config file "${configPathLabel}" is disabled by Sync core plugin settings.`;
+		}
+		if (relativePath && isCommunityPluginAssetPath(relativePath)) {
+			return `Vault config file "${configPathLabel}" is disabled by Sync community plugin files.`;
 		}
 		if (relativePath?.startsWith('themes/') || relativePath?.startsWith('snippets/')) {
 			return `Vault config path "${configPathLabel}" is disabled by Sync appearance.`;

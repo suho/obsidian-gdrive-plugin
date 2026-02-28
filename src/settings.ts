@@ -72,6 +72,8 @@ export interface GDrivePluginSettings {
 	syncAppearance: boolean;
 	syncHotkeys: boolean;
 	syncCommunityPluginList: boolean;
+	syncCorePluginSettings: boolean;
+	syncCommunityPluginFiles: boolean;
 
 	// Internal state
 	setupComplete: boolean;        // false triggers the setup wizard on first load
@@ -120,6 +122,8 @@ export const DEFAULT_SETTINGS: GDrivePluginSettings = {
 	syncAppearance: true,
 	syncHotkeys: false,
 	syncCommunityPluginList: false,
+	syncCorePluginSettings: false,
+	syncCommunityPluginFiles: false,
 
 	// Internal
 	setupComplete: false,
@@ -508,6 +512,28 @@ export class GDriveSettingTab extends PluginSettingTab {
 				t.setValue(this.plugin.settings.syncCommunityPluginList).onChange(v => {
 					void this.updateSelectiveSyncSettings(() => {
 						this.plugin.settings.syncCommunityPluginList = v;
+					});
+				})
+			);
+
+		new Setting(containerEl)
+			.setName('Sync core plugin settings')
+			.setDesc('Sync core-plugins.json, daily-notes.json, templates.json, types.json, and zk-prefixer.json.')
+			.addToggle(t =>
+				t.setValue(this.plugin.settings.syncCorePluginSettings).onChange(v => {
+					void this.updateSelectiveSyncSettings(() => {
+						this.plugin.settings.syncCorePluginSettings = v;
+					});
+				})
+			);
+
+		new Setting(containerEl)
+			.setName('Sync community plugin files')
+			.setDesc('Sync manifest.json, data.json, styles.css, and main.js for each installed community plugin.')
+			.addToggle(t =>
+				t.setValue(this.plugin.settings.syncCommunityPluginFiles).onChange(v => {
+					void this.updateSelectiveSyncSettings(() => {
+						this.plugin.settings.syncCommunityPluginFiles = v;
 					});
 				})
 			);
