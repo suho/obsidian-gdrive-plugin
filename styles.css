@@ -140,6 +140,23 @@ If your plugin does not need CSS, delete this file.
 	width: 100%;
 }
 
+.gdrive-sync-conflict-review-summary {
+	margin-top: 4px;
+	color: var(--text-muted);
+}
+
+.gdrive-sync-conflict-actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+}
+
+.gdrive-sync-conflict-warning {
+	margin-top: 4px;
+	font-size: 0.78rem;
+	color: var(--color-orange);
+}
+
 .gdrive-sync-activity-controls {
 	display: flex;
 	flex-direction: column;

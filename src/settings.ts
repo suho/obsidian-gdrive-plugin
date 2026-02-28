@@ -559,6 +559,15 @@ export class GDriveSettingTab extends PluginSettingTab {
 			);
 
 		new Setting(containerEl)
+			.setName('Review conflicted files')
+			.setDesc('Scan all files for conflict markers and resolve local first, remote first, or manually.')
+			.addButton(btn =>
+				btn.setButtonText('Open').onClick(() => {
+					this.plugin.openConflictedFilesModal();
+				})
+			);
+
+		new Setting(containerEl)
 			.setName('Clear activity log')
 			.setDesc('Remove activity entries from the selected time range.')
 			.addButton(btn =>

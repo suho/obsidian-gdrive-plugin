@@ -11,6 +11,7 @@ import { LargestFilesModal } from './ui/LargestFilesModal';
 import { ProgressModal } from './ui/ProgressModal';
 import { GDriveSettingTab } from './ui/SettingTab';
 import { SetupWizard } from './ui/SetupWizard';
+import { ConflictedFilesModal } from './ui/ConflictedFilesModal';
 import { SyncIgnoredFilesModal } from './ui/SyncIgnoredFilesModal';
 import { SyncStatusBar, type SyncStatusSnapshot } from './ui/SyncStatusBar';
 import { SyncStatusModal } from './ui/SyncStatusModal';
@@ -124,6 +125,14 @@ export default class GDriveSyncPlugin extends Plugin {
 			name: 'View conflicts',
 			callback: () => {
 				void this.activateActivityLogView('conflicts');
+			},
+		});
+
+		this.addCommand({
+			id: 'review-conflicted-files',
+			name: 'Review conflicted files',
+			callback: () => {
+				this.openConflictedFilesModal();
 			},
 		});
 
@@ -346,6 +355,10 @@ export default class GDriveSyncPlugin extends Plugin {
 
 	openLargestFilesModal(): void {
 		new LargestFilesModal(this.app, this).open();
+	}
+
+	openConflictedFilesModal(): void {
+		new ConflictedFilesModal(this.app).open();
 	}
 
 	openSyncIgnoredFilesModal(): void {
