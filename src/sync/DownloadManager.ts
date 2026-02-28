@@ -106,7 +106,7 @@ export class DownloadManager {
 	}
 
 	async applyChange(change: DriveChange, options?: ApplyChangeOptions): Promise<DownloadResult> {
-		if (change.removed) {
+		if (change.removed || change.file?.trashed) {
 			return this.handleRemoteDeletion(change.fileId, options);
 		}
 

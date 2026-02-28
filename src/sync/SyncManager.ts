@@ -118,6 +118,10 @@ export interface DuplicateArtifactCleanupSummary {
 
 type QueueAction = SyncQueueEntry['action'];
 
+function isDeletionLikeChange(change: DriveChange): boolean {
+	return change.removed || change.file?.trashed === true;
+}
+
 function emptyPushSummary(): PushSummary {
 	return {
 		created: 0,
@@ -1681,7 +1685,7 @@ export class SyncManager {
 	}
 
 	private schedulePushQueueProcessing(): void {
-		if (this.pushFlushInFlight || this.syncLock) {
+		if (this.pushFlushInFlight || this.syncLock || this.pullInFlight || this.replayInFlight) {
 			return;
 		}
 		void this.flushPendingPushQueue();
@@ -1853,6 +1857,17 @@ export class SyncManager {
 		const changes = await this.changeTracker.listChangesSinceLastSync();
 		const deduped = new Map<string, DriveChange>();
 		for (const change of changes) {
+			const existing = deduped.get(change.fileId);
+			if (!existing) {
+				deduped.set(change.fileId, change);
+				continue;
+			}
+
+			const existingIsDeletion = isDeletionLikeChange(existing);
+			const incomingIsDeletion = isDeletionLikeChange(change);
+			if (existingIsDeletion && !incomingIsDeletion) {
+				continue;
+			}
 			deduped.set(change.fileId, change);
 		}
 

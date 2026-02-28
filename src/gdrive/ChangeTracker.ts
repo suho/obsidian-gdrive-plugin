@@ -90,6 +90,20 @@ export class ChangeTracker {
 		if (!change.file) return false;
 		if (change.file.mimeType === 'application/vnd.google-apps.folder') return false;
 
+		if (change.file.trashed) {
+			if (this.syncDb.getByGDriveId(change.fileId)) {
+				return true;
+			}
+
+			const parents = change.file.parents ?? [];
+			for (const parentId of parents) {
+				if (await this.isInVaultFolder(parentId, new Set<string>())) {
+					return true;
+				}
+			}
+			return false;
+		}
+
 		// Track already-synced files even if they were moved inside the vault tree.
 		if (this.syncDb.getByGDriveId(change.fileId)) {
 			return true;
