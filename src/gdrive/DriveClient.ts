@@ -86,6 +86,7 @@ export class StorageQuotaError extends DriveClientError {
 
 export class DriveClient {
 	private readonly rateLimiter = new RateLimiter();
+	private readonly ensureFolderInFlight = new Map<string, Promise<string>>();
 
 	constructor(private readonly auth: GoogleAuthManager) {}
 
@@ -284,7 +285,7 @@ export class DriveClient {
 		if (parentId) q += ` and '${parentId}' in parents`;
 
 		const response = await this.requestWithAuth(token => ({
-			url: `${API_BASE}/files?q=${encodeURIComponent(q)}&fields=files(id,name)`,
+			url: `${API_BASE}/files?q=${encodeURIComponent(q)}&fields=files(id,name)&orderBy=${encodeURIComponent('createdTime asc')}&pageSize=1`,
 			headers: { Authorization: `Bearer ${token}` },
 		}));
 		this.assertOk(response.status, response.text);
@@ -312,17 +313,41 @@ export class DriveClient {
 		let currentId = rootFolderId;
 		for (const segment of pathSegments) {
 			if (!segment) continue;
-			const existing = await this.findFolderInParent(segment, currentId);
-			currentId = existing ?? await this.createFolder(segment, currentId);
+			currentId = await this.ensureFolderInParent(segment, currentId);
 		}
 		return currentId;
+	}
+
+	private async ensureFolderInParent(name: string, parentId: string): Promise<string> {
+		const key = `${parentId}\u0000${name}`;
+		const pending = this.ensureFolderInFlight.get(key);
+		if (pending) {
+			return pending;
+		}
+
+		const createdOrExisting = (async () => {
+			const existing = await this.findFolderInParent(name, parentId);
+			if (existing) {
+				return existing;
+			}
+			return this.createFolder(name, parentId);
+		})();
+		this.ensureFolderInFlight.set(key, createdOrExisting);
+
+		try {
+			return await createdOrExisting;
+		} finally {
+			if (this.ensureFolderInFlight.get(key) === createdOrExisting) {
+				this.ensureFolderInFlight.delete(key);
+			}
+		}
 	}
 
 	private async findFolderInParent(name: string, parentId: string): Promise<string | null> {
 		const q = `mimeType='application/vnd.google-apps.folder' and name='${name.replace(/'/g, "\\'")}' and '${parentId}' in parents and trashed=false`;
 
 		const response = await this.requestWithAuth(token => ({
-			url: `${API_BASE}/files?q=${encodeURIComponent(q)}&fields=files(id)`,
+			url: `${API_BASE}/files?q=${encodeURIComponent(q)}&fields=files(id)&orderBy=${encodeURIComponent('createdTime asc')}&pageSize=1`,
 			headers: { Authorization: `Bearer ${token}` },
 		}));
 		this.assertOk(response.status, response.text);
