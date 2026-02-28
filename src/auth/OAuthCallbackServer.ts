@@ -1,9 +1,19 @@
-// eslint-disable-next-line import/no-nodejs-modules
-import * as http from 'http';
-
 interface CallbackResult {
 	code: string;
 	state: string;
+}
+
+type NodeHttpModule = typeof import('http');
+type NodeServer = import('http').Server;
+type NodeIncomingMessage = import('http').IncomingMessage;
+type NodeServerResponse = import('http').ServerResponse;
+
+/**
+ * Desktop-only OAuth callback helper.
+ * Node's `http` module is loaded lazily so mobile auth never touches this path.
+ */
+async function loadNodeHttp(): Promise<NodeHttpModule> {
+	return import('http');
 }
 
 function escapeHtml(value: string): string {
@@ -20,11 +30,12 @@ function escapeHtml(value: string): string {
  * Opens on a random available port, waits for one request, then closes.
  */
 export class OAuthCallbackServer {
-	private server: http.Server | null = null;
+	private server: NodeServer | null = null;
 	private port = 0;
 
 	/** Start the server and return the redirect URI to register with Google. */
 	async start(): Promise<string> {
+		const http = await loadNodeHttp();
 		return new Promise((resolve, reject) => {
 			this.server = http.createServer();
 			this.server.listen(0, '127.0.0.1', () => {
@@ -53,7 +64,7 @@ export class OAuthCallbackServer {
 				reject(new Error('OAuth callback timed out after 5 minutes'));
 			}, 5 * 60 * 1000);
 
-			const requestHandler = (req: http.IncomingMessage, res: http.ServerResponse) => {
+			const requestHandler = (req: NodeIncomingMessage, res: NodeServerResponse) => {
 				const url = new URL(req.url ?? '/', `http://127.0.0.1:${this.port}`);
 				if (req.method !== 'GET' || url.pathname !== '/callback') {
 					res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });

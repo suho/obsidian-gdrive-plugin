@@ -86,17 +86,19 @@ export class ActivityLogView extends ItemView {
 		this.render();
 	}
 
-	async onOpen(): Promise<void> {
+	onOpen(): Promise<void> {
 		this.render();
 		this.registerInterval(window.setInterval(() => {
 			this.renderIfChanged();
 		}, 1000));
+		return Promise.resolve();
 	}
 
-	async onClose(): Promise<void> {
+	onClose(): Promise<void> {
 		this.contentEl.empty();
 		this.filterButtons.clear();
 		this.listEl = null;
+		return Promise.resolve();
 	}
 
 	private renderIfChanged(): void {

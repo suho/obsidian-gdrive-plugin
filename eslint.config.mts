@@ -22,6 +22,13 @@ export default tseslint.config(
 		},
 	},
 	...obsidianmd.configs.recommended,
+	{
+		files: ['src/auth/OAuthCallbackServer.ts'],
+		rules: {
+			// Desktop OAuth requires a localhost callback server; mobile uses obsidian:// callback flow.
+			'import/no-nodejs-modules': 'off',
+		},
+	},
 	globalIgnores([
 		"node_modules",
 		"dist",
