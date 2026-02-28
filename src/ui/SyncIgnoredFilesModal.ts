@@ -1,4 +1,4 @@
-import { App, Modal, Setting } from 'obsidian';
+import { App, Modal, Notice, Setting } from 'obsidian';
 import type GDriveSyncPlugin from '../main';
 import type { SyncIgnoredFileEntry } from '../sync/SyncManager';
 
@@ -53,6 +53,34 @@ export class SyncIgnoredFilesModal extends Modal {
 		);
 	}
 
+	private buildCopyAllText(): string {
+		const lines = [`Ignored files: ${this.entries.length}`];
+		if (this.remoteWarning) {
+			lines.push(`Remote warning: ${this.remoteWarning}`);
+		}
+		lines.push('', 'Path\tSource\tReason');
+
+		for (const entry of this.entries) {
+			lines.push(`${entry.path}\t${entry.source}\t${entry.reasonText}`);
+		}
+
+		return lines.join('\n');
+	}
+
+	private async copyAllEntries(): Promise<void> {
+		if (this.entries.length === 0) {
+			new Notice('No ignored files to copy.');
+			return;
+		}
+
+		try {
+			await navigator.clipboard.writeText(this.buildCopyAllText());
+			new Notice(`Copied ${this.entries.length} ignored files.`);
+		} catch {
+			new Notice('Copy failed. You can copy the table manually.');
+		}
+	}
+
 	private renderVisibleEntries(): void {
 		if (!this.summaryEl || !this.tableBodyEl) {
 			return;
@@ -100,6 +128,14 @@ export class SyncIgnoredFilesModal extends Modal {
 				button.setButtonText('Refresh').onClick(() => {
 					void this.load();
 				});
+			})
+			.addButton(button => {
+				button
+					.setButtonText('Copy all')
+					.setDisabled(this.entries.length === 0)
+					.onClick(() => {
+						void this.copyAllEntries();
+					});
 			});
 
 		const controls = this.contentEl.createDiv({ cls: 'gdrive-sync-folder-controls' });
