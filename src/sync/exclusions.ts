@@ -19,10 +19,7 @@ export interface UserAdjustableSkipCounts {
 type SelectiveSettings = Pick<
 	GDrivePluginSettings,
 	| 'syncImages'
-	| 'syncAudio'
-	| 'syncVideo'
-	| 'syncPdfs'
-	| 'syncOtherTypes'
+	| 'syncNonImageFiles'
 	| 'maxFileSizeBytes'
 	| 'syncEditorSettings'
 	| 'syncAppearance'
@@ -222,10 +219,9 @@ function matchedUserExclusion(path: string, userExclusions: string[]): string | 
 function typeExclusionReason(path: string, settings: SelectiveSettings): ExclusionReason | null {
 	const type = classifyFileType(path);
 	if (type === 'image' && !settings.syncImages) return 'type-disabled';
-	if (type === 'audio' && !settings.syncAudio) return 'type-disabled';
-	if (type === 'video' && !settings.syncVideo) return 'type-disabled';
-	if (type === 'pdf' && !settings.syncPdfs) return 'type-disabled';
-	if (type === 'other' && !settings.syncOtherTypes) return 'type-disabled';
+	if ((type === 'audio' || type === 'video' || type === 'pdf' || type === 'other') && !settings.syncNonImageFiles) {
+		return 'type-disabled';
+	}
 	return null;
 }
 
@@ -316,20 +312,20 @@ export function describeUserAdjustableExclusionReason(
 		}
 		if (type === 'audio') {
 			return extension
-				? `Audio file type (.${extension}) is disabled by Sync audio.`
-				: 'Audio file sync is disabled by Sync audio.';
+				? `Audio file type (.${extension}) is disabled by Sync non-image file types.`
+				: 'Audio file sync is disabled by Sync non-image file types.';
 		}
 		if (type === 'video') {
 			return extension
-				? `Video file type (.${extension}) is disabled by Sync video.`
-				: 'Video file sync is disabled by Sync video.';
+				? `Video file type (.${extension}) is disabled by Sync non-image file types.`
+				: 'Video file sync is disabled by Sync non-image file types.';
 		}
 		if (type === 'pdf') {
-			return 'PDF files are disabled by Sync PDF files.';
+			return 'PDF files are disabled by Sync non-image file types.';
 		}
 		return extension
-			? `File type (.${extension}) is disabled by Sync other file types.`
-			: 'Files without a known media type are disabled by Sync other file types.';
+			? `File type (.${extension}) is disabled by Sync non-image file types.`
+			: 'Files without a known media type are disabled by Sync non-image file types.';
 	}
 	if (reason === 'vault-config-disabled') {
 		const relativePath = relativeConfigPath(path, configDir);

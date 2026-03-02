@@ -18,6 +18,34 @@ import { SyncStatusModal } from './ui/SyncStatusModal';
 import { VersionHistoryModal } from './ui/VersionHistoryModal';
 import { generateDeviceId } from './utils/deviceId';
 
+interface LegacySelectiveSyncSettings {
+	syncAudio?: boolean;
+	syncVideo?: boolean;
+	syncPdfs?: boolean;
+	syncOtherTypes?: boolean;
+	syncNonImageFiles?: boolean;
+}
+
+function resolveLegacyNonImageSyncSetting(
+	settings: LegacySelectiveSyncSettings | null
+): boolean | null {
+	if (!settings || typeof settings.syncNonImageFiles === 'boolean') {
+		return null;
+	}
+
+	const legacyValues = [
+		settings.syncAudio,
+		settings.syncVideo,
+		settings.syncPdfs,
+		settings.syncOtherTypes,
+	].filter((value): value is boolean => typeof value === 'boolean');
+	if (legacyValues.length === 0) {
+		return null;
+	}
+
+	return legacyValues.some(value => value);
+}
+
 export default class GDriveSyncPlugin extends Plugin {
 	settings: GDrivePluginSettings;
 	authManager!: GoogleAuthManager;
@@ -228,7 +256,14 @@ export default class GDriveSyncPlugin extends Plugin {
 	}
 
 	async loadSettings() {
-		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData() as Partial<GDrivePluginSettings>);
+		const loaded = await this.loadData() as (Partial<GDrivePluginSettings> & LegacySelectiveSyncSettings) | null;
+		this.settings = Object.assign({}, DEFAULT_SETTINGS, loaded ?? {});
+
+		const migratedNonImageSync = resolveLegacyNonImageSyncSetting(loaded);
+		if (migratedNonImageSync !== null) {
+			this.settings.syncNonImageFiles = migratedNonImageSync;
+			await this.saveData(this.settings);
+		}
 	}
 
 	async saveSettings() {

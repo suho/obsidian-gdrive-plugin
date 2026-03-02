@@ -57,10 +57,7 @@ export interface GDrivePluginSettings {
 
 	// Selective sync (device-local — never propagated to other devices)
 	syncImages: boolean;
-	syncAudio: boolean;
-	syncVideo: boolean;
-	syncPdfs: boolean;
-	syncOtherTypes: boolean;
+	syncNonImageFiles: boolean;
 	excludedPaths: string[];
 
 	// Conflict resolution
@@ -107,10 +104,7 @@ export const DEFAULT_SETTINGS: GDrivePluginSettings = {
 
 	// Selective sync
 	syncImages: true,
-	syncAudio: true,
-	syncVideo: false,
-	syncPdfs: true,
-	syncOtherTypes: true,
+	syncNonImageFiles: true,
 	excludedPaths: [],
 
 	// Conflict resolution
@@ -387,44 +381,12 @@ export class GDriveSettingTab extends PluginSettingTab {
 			);
 
 		new Setting(containerEl)
-			.setName('Sync audio')
-			.setDesc('Includes common audio formats such as mp3, wav, m4a, ogg, and flac.')
+			.setName('Sync non-image file types')
+			.setDesc('Includes audio, video, PDF files, canvas files, drawing files, and other file types.')
 			.addToggle(t =>
-				t.setValue(this.plugin.settings.syncAudio).onChange(v => {
+				t.setValue(this.plugin.settings.syncNonImageFiles).onChange(v => {
 					void this.updateSelectiveSyncSettings(() => {
-						this.plugin.settings.syncAudio = v;
-					});
-				})
-			);
-
-		new Setting(containerEl)
-			.setName('Sync video')
-			.setDesc('Includes common video formats such as mp4, mov, mkv, and webm.')
-			.addToggle(t =>
-				t.setValue(this.plugin.settings.syncVideo).onChange(v => {
-					void this.updateSelectiveSyncSettings(() => {
-						this.plugin.settings.syncVideo = v;
-					});
-				})
-			);
-
-		new Setting(containerEl)
-			.setName('Sync PDF files')
-			.addToggle(t =>
-				t.setValue(this.plugin.settings.syncPdfs).onChange(v => {
-					void this.updateSelectiveSyncSettings(() => {
-						this.plugin.settings.syncPdfs = v;
-					});
-				})
-			);
-
-		new Setting(containerEl)
-			.setName('Sync other file types')
-			.setDesc('Includes canvas files, drawing files, and other file types.')
-			.addToggle(t =>
-				t.setValue(this.plugin.settings.syncOtherTypes).onChange(v => {
-					void this.updateSelectiveSyncSettings(() => {
-						this.plugin.settings.syncOtherTypes = v;
+						this.plugin.settings.syncNonImageFiles = v;
 					});
 				})
 			);

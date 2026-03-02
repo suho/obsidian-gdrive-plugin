@@ -90,10 +90,7 @@ interface RunSyncOptions {
 
 export interface SelectiveSyncSnapshot {
 	syncImages: boolean;
-	syncAudio: boolean;
-	syncVideo: boolean;
-	syncPdfs: boolean;
-	syncOtherTypes: boolean;
+	syncNonImageFiles: boolean;
 	maxFileSizeBytes: number;
 	excludedPaths: string[];
 	syncEditorSettings: boolean;
@@ -1452,10 +1449,7 @@ export class SyncManager {
 	captureSelectiveSyncSnapshot(): SelectiveSyncSnapshot {
 		return {
 			syncImages: this.plugin.settings.syncImages,
-			syncAudio: this.plugin.settings.syncAudio,
-			syncVideo: this.plugin.settings.syncVideo,
-			syncPdfs: this.plugin.settings.syncPdfs,
-			syncOtherTypes: this.plugin.settings.syncOtherTypes,
+			syncNonImageFiles: this.plugin.settings.syncNonImageFiles,
 			maxFileSizeBytes: this.plugin.settings.maxFileSizeBytes,
 			excludedPaths: [...this.plugin.settings.excludedPaths],
 			syncEditorSettings: this.plugin.settings.syncEditorSettings,
