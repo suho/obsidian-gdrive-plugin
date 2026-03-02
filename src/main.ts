@@ -26,6 +26,12 @@ interface LegacySelectiveSyncSettings {
 	syncNonImageFiles?: boolean;
 }
 
+interface LegacyVaultConfigSyncSettings {
+	syncCommunityPluginList?: boolean;
+	syncCommunityPluginFiles?: boolean;
+	syncCommunityPlugins?: boolean;
+}
+
 function resolveLegacyNonImageSyncSetting(
 	settings: LegacySelectiveSyncSettings | null
 ): boolean | null {
@@ -44,6 +50,22 @@ function resolveLegacyNonImageSyncSetting(
 	}
 
 	return legacyValues.some(value => value);
+}
+
+function resolveLegacyCommunityPluginSyncSetting(
+	settings: LegacyVaultConfigSyncSettings | null
+): boolean | null {
+	if (!settings || typeof settings.syncCommunityPlugins === 'boolean') {
+		return null;
+	}
+
+	const hasLegacyList = typeof settings.syncCommunityPluginList === 'boolean';
+	const hasLegacyFiles = typeof settings.syncCommunityPluginFiles === 'boolean';
+	if (!hasLegacyList && !hasLegacyFiles) {
+		return null;
+	}
+
+	return !!settings.syncCommunityPluginList || !!settings.syncCommunityPluginFiles;
 }
 
 export default class GDriveSyncPlugin extends Plugin {
@@ -256,12 +278,27 @@ export default class GDriveSyncPlugin extends Plugin {
 	}
 
 	async loadSettings() {
-		const loaded = await this.loadData() as (Partial<GDrivePluginSettings> & LegacySelectiveSyncSettings) | null;
+		const loaded = await this.loadData() as (
+			Partial<GDrivePluginSettings> &
+			LegacySelectiveSyncSettings &
+			LegacyVaultConfigSyncSettings
+		) | null;
 		this.settings = Object.assign({}, DEFAULT_SETTINGS, loaded ?? {});
+		let shouldPersist = false;
 
 		const migratedNonImageSync = resolveLegacyNonImageSyncSetting(loaded);
 		if (migratedNonImageSync !== null) {
 			this.settings.syncNonImageFiles = migratedNonImageSync;
+			shouldPersist = true;
+		}
+
+		const migratedCommunityPluginSync = resolveLegacyCommunityPluginSyncSetting(loaded);
+		if (migratedCommunityPluginSync !== null) {
+			this.settings.syncCommunityPlugins = migratedCommunityPluginSync;
+			shouldPersist = true;
+		}
+
+		if (shouldPersist) {
 			await this.saveData(this.settings);
 		}
 	}

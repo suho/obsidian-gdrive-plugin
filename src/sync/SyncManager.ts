@@ -96,9 +96,8 @@ export interface SelectiveSyncSnapshot {
 	syncEditorSettings: boolean;
 	syncAppearance: boolean;
 	syncHotkeys: boolean;
-	syncCommunityPluginList: boolean;
+	syncCommunityPlugins: boolean;
 	syncCorePluginSettings: boolean;
-	syncCommunityPluginFiles: boolean;
 }
 
 interface CleanupDuplicateArtifactsOptions {
@@ -1455,9 +1454,8 @@ export class SyncManager {
 			syncEditorSettings: this.plugin.settings.syncEditorSettings,
 			syncAppearance: this.plugin.settings.syncAppearance,
 			syncHotkeys: this.plugin.settings.syncHotkeys,
-			syncCommunityPluginList: this.plugin.settings.syncCommunityPluginList,
+			syncCommunityPlugins: this.plugin.settings.syncCommunityPlugins,
 			syncCorePluginSettings: this.plugin.settings.syncCorePluginSettings,
-			syncCommunityPluginFiles: this.plugin.settings.syncCommunityPluginFiles,
 		};
 	}
 

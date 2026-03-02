@@ -24,9 +24,8 @@ type SelectiveSettings = Pick<
 	| 'syncEditorSettings'
 	| 'syncAppearance'
 	| 'syncHotkeys'
-	| 'syncCommunityPluginList'
+	| 'syncCommunityPlugins'
 	| 'syncCorePluginSettings'
-	| 'syncCommunityPluginFiles'
 >;
 
 export interface ExclusionDescriptionContext {
@@ -139,9 +138,9 @@ function isAllowedVaultConfigPath(relativePath: string, settings: SelectiveSetti
 	if (relativePath === 'app.json') return settings.syncEditorSettings;
 	if (relativePath === 'appearance.json') return settings.syncAppearance;
 	if (relativePath === 'hotkeys.json') return settings.syncHotkeys;
-	if (relativePath === 'community-plugins.json') return settings.syncCommunityPluginList;
+	if (relativePath === 'community-plugins.json') return settings.syncCommunityPlugins;
 	if (isCorePluginSettingsPath(relativePath)) return settings.syncCorePluginSettings;
-	if (isCommunityPluginAssetPath(relativePath)) return settings.syncCommunityPluginFiles;
+	if (isCommunityPluginAssetPath(relativePath)) return settings.syncCommunityPlugins;
 	if (relativePath.startsWith('themes/') || relativePath.startsWith('snippets/')) return settings.syncAppearance;
 	return false;
 }
@@ -341,13 +340,13 @@ export function describeUserAdjustableExclusionReason(
 			return `Vault config file "${configPathLabel}" is disabled by Sync hotkeys.`;
 		}
 		if (relativePath === 'community-plugins.json') {
-			return `Vault config file "${configPathLabel}" is disabled by Sync community plugin list.`;
+			return `Vault config file "${configPathLabel}" is disabled by Sync community plugins.`;
 		}
 		if (relativePath && isCorePluginSettingsPath(relativePath)) {
 			return `Vault config file "${configPathLabel}" is disabled by Sync core plugin settings.`;
 		}
 		if (relativePath && isCommunityPluginAssetPath(relativePath)) {
-			return `Vault config file "${configPathLabel}" is disabled by Sync community plugin files.`;
+			return `Vault config file "${configPathLabel}" is disabled by Sync community plugins.`;
 		}
 		if (relativePath?.startsWith('themes/') || relativePath?.startsWith('snippets/')) {
 			return `Vault config path "${configPathLabel}" is disabled by Sync appearance.`;

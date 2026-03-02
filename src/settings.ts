@@ -68,9 +68,8 @@ export interface GDrivePluginSettings {
 	syncEditorSettings: boolean;
 	syncAppearance: boolean;
 	syncHotkeys: boolean;
-	syncCommunityPluginList: boolean;
+	syncCommunityPlugins: boolean;
 	syncCorePluginSettings: boolean;
-	syncCommunityPluginFiles: boolean;
 
 	// Internal state
 	setupComplete: boolean;        // false triggers the setup wizard on first load
@@ -115,9 +114,8 @@ export const DEFAULT_SETTINGS: GDrivePluginSettings = {
 	syncEditorSettings: true,
 	syncAppearance: true,
 	syncHotkeys: false,
-	syncCommunityPluginList: false,
+	syncCommunityPlugins: false,
 	syncCorePluginSettings: false,
-	syncCommunityPluginFiles: false,
 
 	// Internal
 	setupComplete: false,
@@ -468,12 +466,12 @@ export class GDriveSettingTab extends PluginSettingTab {
 			);
 
 		new Setting(containerEl)
-			.setName('Sync community plugin list')
-			.setDesc('Sync community-plugins.json only, not plugin binaries.')
+			.setName('Sync community plugins')
+			.setDesc('Sync community-plugins.json plus each installed plugin\'s manifest.json, data.json, styles.css, and main.js.')
 			.addToggle(t =>
-				t.setValue(this.plugin.settings.syncCommunityPluginList).onChange(v => {
+				t.setValue(this.plugin.settings.syncCommunityPlugins).onChange(v => {
 					void this.updateSelectiveSyncSettings(() => {
-						this.plugin.settings.syncCommunityPluginList = v;
+						this.plugin.settings.syncCommunityPlugins = v;
 					});
 				})
 			);
@@ -485,17 +483,6 @@ export class GDriveSettingTab extends PluginSettingTab {
 				t.setValue(this.plugin.settings.syncCorePluginSettings).onChange(v => {
 					void this.updateSelectiveSyncSettings(() => {
 						this.plugin.settings.syncCorePluginSettings = v;
-					});
-				})
-			);
-
-		new Setting(containerEl)
-			.setName('Sync community plugin files')
-			.setDesc('Sync manifest.json, data.json, styles.css, and main.js for each installed community plugin.')
-			.addToggle(t =>
-				t.setValue(this.plugin.settings.syncCommunityPluginFiles).onChange(v => {
-					void this.updateSelectiveSyncSettings(() => {
-						this.plugin.settings.syncCommunityPluginFiles = v;
 					});
 				})
 			);

@@ -157,7 +157,7 @@ No. History here is based on Google Drive revisions, not Obsidian Sync snapshots
 
 ### Does it sync all `.obsidian` files?
 
-No. Only configured categories are synced (for example editor settings, appearance, hotkeys, community plugin list).
+No. Only configured categories are synced (for example editor settings, appearance, hotkeys, community plugins).
 Unsafe and transient files (for example workspace and cache files) are intentionally excluded.
 
 ## Known limitations
