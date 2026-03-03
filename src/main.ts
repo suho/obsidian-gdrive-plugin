@@ -339,6 +339,16 @@ export default class GDriveSyncPlugin extends Plugin {
 			shouldPersist = true;
 		}
 
+		const normalizedAutoPullLocalDeferralMs = clamp(
+			Math.round(this.settings.autoPullLocalDeferralMs / 100) * 100,
+			0,
+			60000
+		);
+		if (this.settings.autoPullLocalDeferralMs !== normalizedAutoPullLocalDeferralMs) {
+			this.settings.autoPullLocalDeferralMs = normalizedAutoPullLocalDeferralMs;
+			shouldPersist = true;
+		}
+
 		const loadedPreset = (loaded as { syncBehaviorPreset?: unknown } | null)?.syncBehaviorPreset;
 		if (isSyncBehaviorPreset(loadedPreset)) {
 			this.settings.syncBehaviorPreset = loadedPreset;
@@ -352,7 +362,8 @@ export default class GDriveSyncPlugin extends Plugin {
 			const hasPresetMismatch =
 				this.settings.pullIntervalSeconds !== presetValues.pullIntervalSeconds ||
 				this.settings.pushQuiescenceMs !== presetValues.pushQuiescenceMs ||
-				this.settings.localEventSettleDelayMs !== presetValues.localEventSettleDelayMs;
+				this.settings.localEventSettleDelayMs !== presetValues.localEventSettleDelayMs ||
+				this.settings.autoPullLocalDeferralMs !== presetValues.autoPullLocalDeferralMs;
 			if (hasPresetMismatch) {
 				applySyncBehaviorPreset(this.settings, this.settings.syncBehaviorPreset);
 				shouldPersist = true;

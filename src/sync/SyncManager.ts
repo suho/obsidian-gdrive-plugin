@@ -418,7 +418,6 @@ export class SyncManager {
 	private static readonly FILE_OPEN_REFRESH_COOLDOWN_MS = 1500;
 	private static readonly SETTINGS_SKIP_NOTICE_COOLDOWN_MS = 5 * 60 * 1000;
 	private static readonly AUTH_REQUIRED_NOTICE_COOLDOWN_MS = 5 * 60 * 1000;
-	private static readonly MAX_AUTO_PULL_LOCAL_DEFERRAL_MS = 10_000;
 
 	private syncLock = false;
 	private pushFlushInFlight = false;
@@ -2382,7 +2381,8 @@ export class SyncManager {
 		}
 
 		const deferralElapsedMs = now - this.autoPullLocalDeferralStartedAt;
-		if (deferralElapsedMs >= SyncManager.MAX_AUTO_PULL_LOCAL_DEFERRAL_MS) {
+		const maxDeferralMs = Math.max(0, this.plugin.settings.autoPullLocalDeferralMs);
+		if (deferralElapsedMs >= maxDeferralMs) {
 			this.resetAutoPullLocalDeferral();
 			return false;
 		}

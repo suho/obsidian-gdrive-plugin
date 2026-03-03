@@ -39,6 +39,7 @@ interface SyncBehaviorPresetValues {
 	pullIntervalSeconds: number;
 	pushQuiescenceMs: number;
 	localEventSettleDelayMs: number;
+	autoPullLocalDeferralMs: number;
 }
 
 const SYNC_BEHAVIOR_PRESET_VALUES: Record<Exclude<SyncBehaviorPreset, 'custom'>, SyncBehaviorPresetValues> = {
@@ -46,16 +47,19 @@ const SYNC_BEHAVIOR_PRESET_VALUES: Record<Exclude<SyncBehaviorPreset, 'custom'>,
 		pullIntervalSeconds: 20,
 		pushQuiescenceMs: 1000,
 		localEventSettleDelayMs: 600,
+		autoPullLocalDeferralMs: 10_000,
 	},
 	balanced: {
 		pullIntervalSeconds: 30,
 		pushQuiescenceMs: 2000,
 		localEventSettleDelayMs: 1500,
+		autoPullLocalDeferralMs: 10_000,
 	},
 	stable: {
 		pullIntervalSeconds: 60,
 		pushQuiescenceMs: 4000,
 		localEventSettleDelayMs: 3000,
+		autoPullLocalDeferralMs: 10_000,
 	},
 };
 
@@ -68,23 +72,25 @@ export function getSyncBehaviorPresetValues(preset: Exclude<SyncBehaviorPreset, 
 }
 
 export function applySyncBehaviorPreset(
-	settings: Pick<GDrivePluginSettings, 'pullIntervalSeconds' | 'pushQuiescenceMs' | 'localEventSettleDelayMs'>,
+	settings: Pick<GDrivePluginSettings, 'pullIntervalSeconds' | 'pushQuiescenceMs' | 'localEventSettleDelayMs' | 'autoPullLocalDeferralMs'>,
 	preset: Exclude<SyncBehaviorPreset, 'custom'>
 ): void {
 	const values = getSyncBehaviorPresetValues(preset);
 	settings.pullIntervalSeconds = values.pullIntervalSeconds;
 	settings.pushQuiescenceMs = values.pushQuiescenceMs;
 	settings.localEventSettleDelayMs = values.localEventSettleDelayMs;
+	settings.autoPullLocalDeferralMs = values.autoPullLocalDeferralMs;
 }
 
 export function inferSyncBehaviorPreset(
-	settings: Pick<GDrivePluginSettings, 'pullIntervalSeconds' | 'pushQuiescenceMs' | 'localEventSettleDelayMs'>
+	settings: Pick<GDrivePluginSettings, 'pullIntervalSeconds' | 'pushQuiescenceMs' | 'localEventSettleDelayMs' | 'autoPullLocalDeferralMs'>
 ): SyncBehaviorPreset {
 	for (const [preset, values] of Object.entries(SYNC_BEHAVIOR_PRESET_VALUES)) {
 		if (
 			settings.pullIntervalSeconds === values.pullIntervalSeconds &&
 			settings.pushQuiescenceMs === values.pushQuiescenceMs &&
-			settings.localEventSettleDelayMs === values.localEventSettleDelayMs
+			settings.localEventSettleDelayMs === values.localEventSettleDelayMs &&
+			settings.autoPullLocalDeferralMs === values.autoPullLocalDeferralMs
 		) {
 			return preset as Exclude<SyncBehaviorPreset, 'custom'>;
 		}
@@ -112,6 +118,7 @@ export interface GDrivePluginSettings {
 	pullIntervalSeconds: number;   // default: 30
 	pushQuiescenceMs: number;      // default: 2000 — inactivity delay before pushing a modified file
 	localEventSettleDelayMs: number; // default: 1500 — delay to compact move/rename bursts before push
+	autoPullLocalDeferralMs: number; // default: 10000 — maximum delay before auto-pull runs while local changes are active
 	syncOnStartup: boolean;        // default: true
 	wifiOnlySync: boolean;         // default: true on mobile, false on desktop
 	maxFileSizeBytes: number;      // default: 20 MB
@@ -160,6 +167,7 @@ export const DEFAULT_SETTINGS: GDrivePluginSettings = {
 	pullIntervalSeconds: 30,
 	pushQuiescenceMs: 2000,
 	localEventSettleDelayMs: 1500,
+	autoPullLocalDeferralMs: 10_000,
 	syncOnStartup: true,
 	wifiOnlySync: Platform.isMobile,
 	maxFileSizeBytes: 20 * 1024 * 1024,
@@ -431,6 +439,26 @@ export class GDriveSettingTab extends PluginSettingTab {
 					.setDynamicTooltip()
 					.onChange(async val => {
 						this.plugin.settings.localEventSettleDelayMs = val;
+						this.plugin.settings.syncBehaviorPreset = 'custom';
+						await this.plugin.saveSettings();
+					})
+			);
+
+		new Setting(containerEl)
+			.setName('Auto-pull local deferral')
+			.setDesc(
+				syncBehaviorIsCustom
+					? 'Maximum time to defer remote checks while local changes are still settling (milliseconds).'
+					: 'Maximum time to defer remote checks while local changes are still settling (milliseconds). Set profile to custom to edit.'
+			)
+			.addSlider(slider =>
+				slider
+					.setLimits(0, 60000, 100)
+					.setValue(this.plugin.settings.autoPullLocalDeferralMs)
+					.setDisabled(!syncBehaviorIsCustom)
+					.setDynamicTooltip()
+					.onChange(async val => {
+						this.plugin.settings.autoPullLocalDeferralMs = val;
 						this.plugin.settings.syncBehaviorPreset = 'custom';
 						await this.plugin.saveSettings();
 					})
