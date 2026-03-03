@@ -159,13 +159,180 @@ function parseOfflineQueuePayload(raw: string): SyncQueueEntry[] {
 		throw new Error('Invalid offline queue payload');
 	}
 
-	return payload.queue
+	const normalized = payload.queue
 		.filter(isQueueEntry)
 		.map(entry => ({
 			...entry,
 			path: normalizePath(entry.path),
 			oldPath: entry.oldPath ? normalizePath(entry.oldPath) : undefined,
 		}));
+	return compactQueueEntries(normalized);
+}
+
+function findLastQueuedEntryByPath(queue: SyncQueueEntry[], path: string): number {
+	for (let index = queue.length - 1; index >= 0; index -= 1) {
+		if (queue[index]?.path === path) {
+			return index;
+		}
+	}
+	return -1;
+}
+
+function compactQueueEntries(queue: SyncQueueEntry[]): SyncQueueEntry[] {
+	const compacted: SyncQueueEntry[] = [];
+
+	const appendDelete = (entry: SyncQueueEntry): void => {
+		let targetPath = entry.path;
+		while (true) {
+			const existingIndex = findLastQueuedEntryByPath(compacted, targetPath);
+			if (existingIndex < 0) {
+				compacted.push({
+					...entry,
+					action: 'delete',
+					path: targetPath,
+					oldPath: undefined,
+				});
+				return;
+			}
+
+			const existing = compacted[existingIndex]!;
+			if (existing.action === 'create') {
+				compacted.splice(existingIndex, 1);
+				return;
+			}
+			if (existing.action === 'update') {
+				compacted[existingIndex] = {
+					...entry,
+					action: 'delete',
+					path: targetPath,
+					oldPath: undefined,
+				};
+				return;
+			}
+			if (existing.action === 'delete') {
+				return;
+			}
+			if (existing.action === 'rename' && existing.oldPath) {
+				targetPath = existing.oldPath;
+				compacted.splice(existingIndex, 1);
+				continue;
+			}
+
+			compacted[existingIndex] = {
+				...entry,
+				action: 'delete',
+				path: targetPath,
+				oldPath: undefined,
+			};
+			return;
+		}
+	};
+
+	for (const rawEntry of queue) {
+		const entry: SyncQueueEntry = {
+			...rawEntry,
+			path: normalizePath(rawEntry.path),
+			oldPath: rawEntry.oldPath ? normalizePath(rawEntry.oldPath) : undefined,
+		};
+
+		if (entry.action === 'create' || entry.action === 'update') {
+			const existingIndex = findLastQueuedEntryByPath(compacted, entry.path);
+			if (existingIndex < 0) {
+				compacted.push({
+					...entry,
+					oldPath: undefined,
+				});
+				continue;
+			}
+
+			const existing = compacted[existingIndex]!;
+			if (existing.action === 'create') {
+				compacted[existingIndex] = {
+					...existing,
+					timestamp: entry.timestamp,
+					retryCount: entry.retryCount,
+					localHash: entry.localHash,
+				};
+				continue;
+			}
+			if (existing.action === 'update' || existing.action === 'delete') {
+				compacted[existingIndex] = {
+					...entry,
+					action: 'update',
+					oldPath: undefined,
+				};
+				continue;
+			}
+			if (existing.action === 'rename') {
+				// Rename already includes content hash of destination path.
+				continue;
+			}
+
+			compacted.push({
+				...entry,
+				oldPath: undefined,
+			});
+			continue;
+		}
+
+		if (entry.action === 'delete') {
+			appendDelete(entry);
+			continue;
+		}
+
+		const oldPath = entry.oldPath;
+		if (!oldPath || oldPath === entry.path) {
+			continue;
+		}
+
+		const duplicateDestinationIndex = findLastQueuedEntryByPath(compacted, entry.path);
+		if (duplicateDestinationIndex >= 0) {
+			const duplicateDestination = compacted[duplicateDestinationIndex]!;
+			if (duplicateDestination.action === 'create' || duplicateDestination.action === 'update') {
+				compacted.splice(duplicateDestinationIndex, 1);
+			}
+		}
+
+		const sourceIndex = findLastQueuedEntryByPath(compacted, oldPath);
+		if (sourceIndex < 0) {
+			compacted.push(entry);
+			continue;
+		}
+
+		const source = compacted[sourceIndex]!;
+		if (source.action === 'create') {
+			compacted[sourceIndex] = {
+				...source,
+				path: entry.path,
+				timestamp: entry.timestamp,
+				retryCount: entry.retryCount,
+				localHash: entry.localHash ?? source.localHash,
+			};
+			continue;
+		}
+		if (source.action === 'update') {
+			compacted[sourceIndex] = {
+				...entry,
+				action: 'rename',
+				oldPath,
+			};
+			continue;
+		}
+		if (source.action === 'rename' && source.oldPath) {
+			compacted[sourceIndex] = {
+				...source,
+				path: entry.path,
+				timestamp: entry.timestamp,
+				retryCount: entry.retryCount,
+				localHash: entry.localHash ?? source.localHash,
+			};
+			continue;
+		}
+
+		compacted.push(entry);
+	}
+
+	return compacted;
 }
 
 function isActivityAction(value: unknown): value is ActivityAction {
@@ -1675,7 +1842,7 @@ export class SyncManager {
 			this.cancelModifyDebouncer(normalizedEntry.oldPath);
 		}
 
-		this.pendingPushQueue.push(normalizedEntry);
+		this.pendingPushQueue = compactQueueEntries([...this.pendingPushQueue, normalizedEntry]);
 		this.updateStatusFromCurrentState();
 		this.schedulePushQueueProcessing();
 	}
@@ -1998,7 +2165,7 @@ export class SyncManager {
 
 		this.replayInFlight = true;
 		try {
-			this.pendingPushQueue = [...this.offlineQueue, ...this.pendingPushQueue];
+			this.pendingPushQueue = compactQueueEntries([...this.offlineQueue, ...this.pendingPushQueue]);
 			this.offlineQueue = [];
 			await this.persistOfflineQueue();
 			return this.flushPendingPushQueue();
@@ -2012,7 +2179,7 @@ export class SyncManager {
 			return;
 		}
 
-		this.offlineQueue.push(...this.pendingPushQueue);
+		this.offlineQueue = compactQueueEntries([...this.offlineQueue, ...this.pendingPushQueue]);
 		this.pendingPushQueue = [];
 		await this.persistOfflineQueue();
 	}

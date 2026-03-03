@@ -208,6 +208,13 @@ export class UploadManager {
 		}
 
 		const localHash = await computeContentHash(await this.plugin.app.vault.adapter.readBinary(normalizedNewPath));
+		const sourceRecord = this.syncDb.getRecord(normalizedOldPath);
+		if (!sourceRecord) {
+			const destinationRecord = this.syncDb.getRecord(normalizedNewPath);
+			if (destinationRecord?.localHash === localHash) {
+				return false;
+			}
+		}
 		await this.applyRename(normalizedOldPath, normalizedNewPath, localHash);
 		return true;
 	}
@@ -339,6 +346,13 @@ export class UploadManager {
 	private async applyRename(oldPath: string, newPath: string, localHash: string): Promise<void> {
 		const record = this.syncDb.getRecord(oldPath);
 		if (!record) {
+			const existingTargetRecord = this.syncDb.getRecord(newPath);
+			if (existingTargetRecord) {
+				if (existingTargetRecord.localHash !== localHash) {
+					await this.pushExistingFile(newPath, localHash);
+				}
+				return;
+			}
 			await this.pushNewFile(newPath, localHash);
 			return;
 		}
