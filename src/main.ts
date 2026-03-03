@@ -1,7 +1,14 @@
 import { Notice, Platform, Plugin, TFile } from 'obsidian';
 import { GoogleAuthManager } from './auth/GoogleAuthManager';
 import { DriveClient } from './gdrive/DriveClient';
-import { DEFAULT_SETTINGS, type GDrivePluginSettings } from './settings';
+import {
+	DEFAULT_SETTINGS,
+	applySyncBehaviorPreset,
+	getSyncBehaviorPresetValues,
+	inferSyncBehaviorPreset,
+	isSyncBehaviorPreset,
+	type GDrivePluginSettings,
+} from './settings';
 import { SyncManager } from './sync/SyncManager';
 import type { ActivityLogEntry } from './types';
 import { ActivityLogModal, ActivityLogView, ACTIVITY_LOG_VIEW_TYPE, type ActivityLogFilter } from './ui/ActivityLogView';
@@ -66,6 +73,10 @@ function resolveLegacyCommunityPluginSyncSetting(
 	}
 
 	return !!settings.syncCommunityPluginList || !!settings.syncCommunityPluginFiles;
+}
+
+function clamp(value: number, min: number, max: number): number {
+	return Math.min(max, Math.max(min, value));
 }
 
 export default class GDriveSyncPlugin extends Plugin {
@@ -296,6 +307,56 @@ export default class GDriveSyncPlugin extends Plugin {
 		if (migratedCommunityPluginSync !== null) {
 			this.settings.syncCommunityPlugins = migratedCommunityPluginSync;
 			shouldPersist = true;
+		}
+
+		const normalizedPullIntervalSeconds = clamp(
+			Math.round(this.settings.pullIntervalSeconds / 10) * 10,
+			10,
+			300
+		);
+		if (this.settings.pullIntervalSeconds !== normalizedPullIntervalSeconds) {
+			this.settings.pullIntervalSeconds = normalizedPullIntervalSeconds;
+			shouldPersist = true;
+		}
+
+		const normalizedPushQuiescenceMs = clamp(
+			Math.round(this.settings.pushQuiescenceMs / 500) * 500,
+			500,
+			10000
+		);
+		if (this.settings.pushQuiescenceMs !== normalizedPushQuiescenceMs) {
+			this.settings.pushQuiescenceMs = normalizedPushQuiescenceMs;
+			shouldPersist = true;
+		}
+
+		const normalizedLocalEventSettleDelayMs = clamp(
+			Math.round(this.settings.localEventSettleDelayMs / 100) * 100,
+			0,
+			10000
+		);
+		if (this.settings.localEventSettleDelayMs !== normalizedLocalEventSettleDelayMs) {
+			this.settings.localEventSettleDelayMs = normalizedLocalEventSettleDelayMs;
+			shouldPersist = true;
+		}
+
+		const loadedPreset = (loaded as { syncBehaviorPreset?: unknown } | null)?.syncBehaviorPreset;
+		if (isSyncBehaviorPreset(loadedPreset)) {
+			this.settings.syncBehaviorPreset = loadedPreset;
+		} else {
+			this.settings.syncBehaviorPreset = inferSyncBehaviorPreset(this.settings);
+			shouldPersist = true;
+		}
+
+		if (this.settings.syncBehaviorPreset !== 'custom') {
+			const presetValues = getSyncBehaviorPresetValues(this.settings.syncBehaviorPreset);
+			const hasPresetMismatch =
+				this.settings.pullIntervalSeconds !== presetValues.pullIntervalSeconds ||
+				this.settings.pushQuiescenceMs !== presetValues.pushQuiescenceMs ||
+				this.settings.localEventSettleDelayMs !== presetValues.localEventSettleDelayMs;
+			if (hasPresetMismatch) {
+				applySyncBehaviorPreset(this.settings, this.settings.syncBehaviorPreset);
+				shouldPersist = true;
+			}
 		}
 
 		if (shouldPersist) {

@@ -33,6 +33,66 @@ function formatLocalDateTime(ts: number): string {
 	});
 }
 
+export type SyncBehaviorPreset = 'fast' | 'balanced' | 'stable' | 'custom';
+
+interface SyncBehaviorPresetValues {
+	pullIntervalSeconds: number;
+	pushQuiescenceMs: number;
+	localEventSettleDelayMs: number;
+}
+
+const SYNC_BEHAVIOR_PRESET_VALUES: Record<Exclude<SyncBehaviorPreset, 'custom'>, SyncBehaviorPresetValues> = {
+	fast: {
+		pullIntervalSeconds: 20,
+		pushQuiescenceMs: 1000,
+		localEventSettleDelayMs: 600,
+	},
+	balanced: {
+		pullIntervalSeconds: 30,
+		pushQuiescenceMs: 2000,
+		localEventSettleDelayMs: 1500,
+	},
+	stable: {
+		pullIntervalSeconds: 60,
+		pushQuiescenceMs: 4000,
+		localEventSettleDelayMs: 3000,
+	},
+};
+
+export function isSyncBehaviorPreset(value: unknown): value is SyncBehaviorPreset {
+	return value === 'fast' || value === 'balanced' || value === 'stable' || value === 'custom';
+}
+
+export function getSyncBehaviorPresetValues(preset: Exclude<SyncBehaviorPreset, 'custom'>): SyncBehaviorPresetValues {
+	return SYNC_BEHAVIOR_PRESET_VALUES[preset];
+}
+
+export function applySyncBehaviorPreset(
+	settings: Pick<GDrivePluginSettings, 'pullIntervalSeconds' | 'pushQuiescenceMs' | 'localEventSettleDelayMs'>,
+	preset: Exclude<SyncBehaviorPreset, 'custom'>
+): void {
+	const values = getSyncBehaviorPresetValues(preset);
+	settings.pullIntervalSeconds = values.pullIntervalSeconds;
+	settings.pushQuiescenceMs = values.pushQuiescenceMs;
+	settings.localEventSettleDelayMs = values.localEventSettleDelayMs;
+}
+
+export function inferSyncBehaviorPreset(
+	settings: Pick<GDrivePluginSettings, 'pullIntervalSeconds' | 'pushQuiescenceMs' | 'localEventSettleDelayMs'>
+): SyncBehaviorPreset {
+	for (const [preset, values] of Object.entries(SYNC_BEHAVIOR_PRESET_VALUES)) {
+		if (
+			settings.pullIntervalSeconds === values.pullIntervalSeconds &&
+			settings.pushQuiescenceMs === values.pushQuiescenceMs &&
+			settings.localEventSettleDelayMs === values.localEventSettleDelayMs
+		) {
+			return preset as Exclude<SyncBehaviorPreset, 'custom'>;
+		}
+	}
+
+	return 'custom';
+}
+
 export interface GDrivePluginSettings {
 	// Authentication (device-local, never synced to GDrive)
 	oauthClientId: string;
@@ -48,8 +108,10 @@ export interface GDrivePluginSettings {
 
 	// Sync behavior (device-local)
 	autoSync: boolean;
+	syncBehaviorPreset: SyncBehaviorPreset;
 	pullIntervalSeconds: number;   // default: 30
 	pushQuiescenceMs: number;      // default: 2000 — inactivity delay before pushing a modified file
+	localEventSettleDelayMs: number; // default: 1500 — delay to compact move/rename bursts before push
 	syncOnStartup: boolean;        // default: true
 	wifiOnlySync: boolean;         // default: true on mobile, false on desktop
 	maxFileSizeBytes: number;      // default: 20 MB
@@ -94,8 +156,10 @@ export const DEFAULT_SETTINGS: GDrivePluginSettings = {
 
 	// Sync behavior
 	autoSync: true,
+	syncBehaviorPreset: 'balanced',
 	pullIntervalSeconds: 30,
 	pushQuiescenceMs: 2000,
+	localEventSettleDelayMs: 1500,
 	syncOnStartup: true,
 	wifiOnlySync: Platform.isMobile,
 	maxFileSizeBytes: 20 * 1024 * 1024,
@@ -277,6 +341,7 @@ export class GDriveSettingTab extends PluginSettingTab {
 
 		// ── Sync behavior ─────────────────────────────────────────────
 		new Setting(containerEl).setName('Sync behavior').setHeading();
+		const syncBehaviorIsCustom = this.plugin.settings.syncBehaviorPreset === 'custom';
 
 		new Setting(containerEl)
 			.setName('Auto-sync')
@@ -289,29 +354,84 @@ export class GDriveSettingTab extends PluginSettingTab {
 			);
 
 		new Setting(containerEl)
+			.setName('Sync behavior profile')
+			.setDesc('Pick fast, balanced, or stable defaults, or choose custom to tune each delay.')
+			.addDropdown(drop =>
+				drop
+					.addOption('fast', 'Fast')
+					.addOption('balanced', 'Balanced')
+					.addOption('stable', 'Stable')
+					.addOption('custom', 'Custom')
+					.setValue(this.plugin.settings.syncBehaviorPreset)
+					.onChange(async value => {
+						if (!isSyncBehaviorPreset(value)) {
+							return;
+						}
+						this.plugin.settings.syncBehaviorPreset = value;
+						if (value !== 'custom') {
+							applySyncBehaviorPreset(this.plugin.settings, value);
+						}
+						await this.plugin.saveSettings();
+						this.display();
+					})
+			);
+
+		new Setting(containerEl)
 			.setName('Pull interval')
-			.setDesc('How often to check Google Drive for remote changes (seconds).')
+			.setDesc(
+				syncBehaviorIsCustom
+					? 'How often to check Google Drive for remote changes (seconds).'
+					: 'How often to check Google Drive for remote changes (seconds). Set profile to custom to edit.'
+			)
 			.addSlider(slider =>
 				slider
 					.setLimits(10, 300, 10)
 					.setValue(this.plugin.settings.pullIntervalSeconds)
+					.setDisabled(!syncBehaviorIsCustom)
 					.setDynamicTooltip()
 					.onChange(async val => {
 						this.plugin.settings.pullIntervalSeconds = val;
+						this.plugin.settings.syncBehaviorPreset = 'custom';
 						await this.plugin.saveSettings();
 					})
 			);
 
 		new Setting(containerEl)
 			.setName('Edit quiescence delay')
-			.setDesc('How long to wait after the last edit before uploading a file (milliseconds).')
+			.setDesc(
+				syncBehaviorIsCustom
+					? 'How long to wait after the last edit before uploading a file (milliseconds).'
+					: 'How long to wait after the last edit before uploading a file (milliseconds). Set profile to custom to edit.'
+			)
 			.addSlider(slider =>
 				slider
 					.setLimits(500, 10000, 500)
 					.setValue(this.plugin.settings.pushQuiescenceMs)
+					.setDisabled(!syncBehaviorIsCustom)
 					.setDynamicTooltip()
 					.onChange(async val => {
 						this.plugin.settings.pushQuiescenceMs = val;
+						this.plugin.settings.syncBehaviorPreset = 'custom';
+						await this.plugin.saveSettings();
+					})
+			);
+
+		new Setting(containerEl)
+			.setName('Local event settle delay')
+			.setDesc(
+				syncBehaviorIsCustom
+					? 'How long to wait for move and rename bursts before flushing the local push queue (milliseconds).'
+					: 'How long to wait for move and rename bursts before flushing the local push queue (milliseconds). Set profile to custom to edit.'
+			)
+			.addSlider(slider =>
+				slider
+					.setLimits(0, 10000, 100)
+					.setValue(this.plugin.settings.localEventSettleDelayMs)
+					.setDisabled(!syncBehaviorIsCustom)
+					.setDynamicTooltip()
+					.onChange(async val => {
+						this.plugin.settings.localEventSettleDelayMs = val;
+						this.plugin.settings.syncBehaviorPreset = 'custom';
 						await this.plugin.saveSettings();
 					})
 			);

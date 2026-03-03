@@ -418,6 +418,7 @@ export class SyncManager {
 	private static readonly FILE_OPEN_REFRESH_COOLDOWN_MS = 1500;
 	private static readonly SETTINGS_SKIP_NOTICE_COOLDOWN_MS = 5 * 60 * 1000;
 	private static readonly AUTH_REQUIRED_NOTICE_COOLDOWN_MS = 5 * 60 * 1000;
+	private static readonly MAX_AUTO_PULL_LOCAL_DEFERRAL_MS = 10_000;
 
 	private syncLock = false;
 	private pushFlushInFlight = false;
@@ -427,6 +428,10 @@ export class SyncManager {
 	private isNetworkOffline = false;
 	private localChangeSuppressionDepth = 0;
 	private readonly lastFileOpenRefreshAt = new Map<string, number>();
+	private localEventSettleTimer: ReturnType<typeof setTimeout> | null = null;
+	private lastLocalQueueMutationAt = 0;
+	private autoPullDeferredByLocalActivity = false;
+	private autoPullLocalDeferralStartedAt = 0;
 
 	private readonly modifyDebouncers = new Map<string, DebouncedFn<[]>>();
 	private pendingPushQueue: SyncQueueEntry[] = [];
@@ -506,8 +511,10 @@ export class SyncManager {
 	async shutdown(): Promise<void> {
 		this.shuttingDown = true;
 		this.cancelAllModifyDebouncers();
+		this.clearLocalEventSettleTimer();
+		this.resetAutoPullLocalDeferral();
 		if (this.pendingPushQueue.length > 0) {
-			this.offlineQueue.push(...this.pendingPushQueue);
+			this.offlineQueue = compactQueueEntries([...this.offlineQueue, ...this.pendingPushQueue]);
 			this.pendingPushQueue = [];
 		}
 		await this.persistOfflineQueue();
@@ -526,6 +533,8 @@ export class SyncManager {
 		this.plugin.settings.syncPaused = true;
 		await this.plugin.saveSettings();
 		this.cancelAllModifyDebouncers();
+		this.clearLocalEventSettleTimer();
+		this.resetAutoPullLocalDeferral();
 		this.statusBar.setPaused();
 	}
 
@@ -538,6 +547,7 @@ export class SyncManager {
 		await this.plugin.saveSettings();
 		await this.refreshConnectivityState(false);
 		this.updateStatusFromCurrentState();
+		this.schedulePushQueueProcessing();
 	}
 
 	isUploadBlockedByStorageQuota(): boolean {
@@ -968,6 +978,8 @@ export class SyncManager {
 		await this.ensureSyncDbReady();
 
 		this.cancelAllModifyDebouncers();
+		this.clearLocalEventSettleTimer();
+		this.resetAutoPullLocalDeferral();
 		this.pendingPushQueue = [];
 		this.offlineQueue = [];
 		await this.syncDb.deletePersistedFiles();
@@ -1843,6 +1855,7 @@ export class SyncManager {
 		}
 
 		this.pendingPushQueue = compactQueueEntries([...this.pendingPushQueue, normalizedEntry]);
+		this.markLocalQueueMutation();
 		this.updateStatusFromCurrentState();
 		this.schedulePushQueueProcessing();
 	}
@@ -1851,6 +1864,18 @@ export class SyncManager {
 		if (this.pushFlushInFlight || this.syncLock || this.pullInFlight || this.replayInFlight) {
 			return;
 		}
+		if (this.pendingPushQueue.length === 0) {
+			this.clearLocalEventSettleTimer();
+			return;
+		}
+
+		const waitMs = this.getPushQueueSettleWaitMs();
+		if (waitMs > 0) {
+			this.scheduleLocalEventSettleTimer(waitMs);
+			return;
+		}
+
+		this.clearLocalEventSettleTimer();
 		void this.flushPendingPushQueue();
 	}
 
@@ -1880,6 +1905,7 @@ export class SyncManager {
 			return emptyPushSummary();
 		}
 
+		this.clearLocalEventSettleTimer();
 		this.pushFlushInFlight = true;
 		let changedDb = false;
 		const summary = emptyPushSummary();
@@ -1922,6 +1948,13 @@ export class SyncManager {
 		} finally {
 			this.pushFlushInFlight = false;
 			this.updateStatusFromCurrentState();
+			if (this.pendingPushQueue.length > 0) {
+				this.schedulePushQueueProcessing();
+			} else if (this.shouldRunDeferredAutoPull()) {
+				this.autoPullDeferredByLocalActivity = false;
+				this.autoPullLocalDeferralStartedAt = 0;
+				void this.runAutoPull();
+			}
 		}
 
 		return summary;
@@ -1982,7 +2015,12 @@ export class SyncManager {
 		if (!canSync) {
 			return;
 		}
+		if (this.shouldDeferAutoPullForLocalActivity()) {
+			this.schedulePushQueueProcessing();
+			return;
+		}
 
+		this.resetAutoPullLocalDeferral();
 		this.pullInFlight = true;
 		this.resetSkippedBySettingsTracking();
 		try {
@@ -2071,6 +2109,8 @@ export class SyncManager {
 
 	private async handleOfflineEvent(): Promise<void> {
 		this.isNetworkOffline = true;
+		this.clearLocalEventSettleTimer();
+		this.resetAutoPullLocalDeferral();
 		await this.movePendingQueueToOffline();
 		this.updateStatusFromCurrentState();
 	}
@@ -2179,6 +2219,7 @@ export class SyncManager {
 			return;
 		}
 
+		this.clearLocalEventSettleTimer();
 		this.offlineQueue = compactQueueEntries([...this.offlineQueue, ...this.pendingPushQueue]);
 		this.pendingPushQueue = [];
 		await this.persistOfflineQueue();
@@ -2295,6 +2336,78 @@ export class SyncManager {
 		}
 
 		return false;
+	}
+
+	private markLocalQueueMutation(): void {
+		this.lastLocalQueueMutationAt = Date.now();
+	}
+
+	private getPushQueueSettleWaitMs(): number {
+		const settleDelayMs = Math.max(0, this.plugin.settings.localEventSettleDelayMs);
+		if (settleDelayMs === 0 || this.lastLocalQueueMutationAt === 0) {
+			return 0;
+		}
+
+		const elapsedMs = Date.now() - this.lastLocalQueueMutationAt;
+		return elapsedMs >= settleDelayMs ? 0 : settleDelayMs - elapsedMs;
+	}
+
+	private scheduleLocalEventSettleTimer(waitMs: number): void {
+		const boundedWaitMs = Math.max(0, Math.ceil(waitMs));
+		this.clearLocalEventSettleTimer();
+		this.localEventSettleTimer = setTimeout(() => {
+			this.localEventSettleTimer = null;
+			this.schedulePushQueueProcessing();
+		}, boundedWaitMs);
+	}
+
+	private clearLocalEventSettleTimer(): void {
+		if (this.localEventSettleTimer === null) {
+			return;
+		}
+		clearTimeout(this.localEventSettleTimer);
+		this.localEventSettleTimer = null;
+	}
+
+	private shouldDeferAutoPullForLocalActivity(): boolean {
+		const hasPendingLocalActivity = this.modifyDebouncers.size > 0 || this.pendingPushQueue.length > 0;
+		if (!hasPendingLocalActivity) {
+			this.resetAutoPullLocalDeferral();
+			return false;
+		}
+
+		const now = Date.now();
+		if (this.autoPullLocalDeferralStartedAt === 0) {
+			this.autoPullLocalDeferralStartedAt = now;
+		}
+
+		const deferralElapsedMs = now - this.autoPullLocalDeferralStartedAt;
+		if (deferralElapsedMs >= SyncManager.MAX_AUTO_PULL_LOCAL_DEFERRAL_MS) {
+			this.resetAutoPullLocalDeferral();
+			return false;
+		}
+
+		this.autoPullDeferredByLocalActivity = true;
+		return true;
+	}
+
+	private shouldRunDeferredAutoPull(): boolean {
+		return (
+			this.autoPullDeferredByLocalActivity &&
+			!this.shuttingDown &&
+			!this.syncLock &&
+			!this.pullInFlight &&
+			!this.replayInFlight &&
+			this.plugin.settings.autoSync &&
+			!this.plugin.settings.syncPaused &&
+			this.modifyDebouncers.size === 0 &&
+			this.pendingPushQueue.length === 0
+		);
+	}
+
+	private resetAutoPullLocalDeferral(): void {
+		this.autoPullDeferredByLocalActivity = false;
+		this.autoPullLocalDeferralStartedAt = 0;
 	}
 
 	private cancelModifyDebouncer(path: string): void {
@@ -2609,12 +2722,13 @@ export class SyncManager {
 		if (alreadyQueued) {
 			return 0;
 		}
-		this.pendingPushQueue.push({
+		this.pendingPushQueue = compactQueueEntries([...this.pendingPushQueue, {
 			action: 'update',
 			path: normalizedPath,
 			timestamp: Date.now(),
 			retryCount: 0,
-		});
+		}]);
+		this.markLocalQueueMutation();
 		return 1;
 	}
 
