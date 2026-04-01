@@ -1,6 +1,6 @@
 import { App, Modal, Notice, Platform, Setting, normalizePath, setIcon } from 'obsidian';
 import type GDriveSyncPlugin from '../main';
-import type { DriveFileWithPath } from '../gdrive/DriveClient';
+import { DriveClientError, type DriveFileWithPath } from '../gdrive/DriveClient';
 import type { DriveFileMetadata } from '../types';
 import { computeContentHash } from '../utils/checksums';
 import { isExcluded } from '../sync/exclusions';
@@ -126,6 +126,8 @@ export class SetupWizard extends Modal {
 	private initialSyncRan = false;
 	private oauthClientIdInput = '';
 	private oauthClientSecretInput = '';
+	private reuseSavedFolderAfterAuthentication = false;
+	private folderStepNotice = '';
 
 	constructor(
 		app: App,
@@ -136,6 +138,15 @@ export class SetupWizard extends Modal {
 	}
 
 	onOpen(): void {
+		this.selectedFolderId = this.plugin.settings.gDriveFolderId;
+		this.selectedFolderName = this.plugin.settings.gDriveFolderName;
+		this.selectedExistingFolderId = this.plugin.settings.gDriveFolderId;
+		this.newFolderName = this.plugin.settings.gDriveFolderName || this.app.vault.getName();
+		this.reuseSavedFolderAfterAuthentication =
+			!this.plugin.authManager.isAuthenticated &&
+			!!this.plugin.settings.gDriveFolderId &&
+			(this.plugin.settings.needsReauthentication || this.plugin.settings.setupComplete);
+		this.folderStepNotice = '';
 		this.step = this.plugin.authManager.isAuthenticated ? 'folder' : 'authenticate';
 		this.initialSyncRan = false;
 		this.oauthClientIdInput = this.plugin.settings.oauthClientId;
@@ -174,7 +185,12 @@ export class SetupWizard extends Modal {
 	}
 
 	private renderAuthStep(): void {
-		this.titleEl.setText(Platform.isMobile ? 'Connect account' : 'Connect to Google Drive');
+		const isReauthenticationFlow = this.reuseSavedFolderAfterAuthentication && this.plugin.settings.setupComplete;
+		this.titleEl.setText(
+			Platform.isMobile
+				? 'Connect account'
+				: (isReauthenticationFlow ? 'Re-authenticate with Google Drive' : 'Connect to Google Drive')
+		);
 
 		const desc = this.contentEl.createEl('p');
 		if (Platform.isMobile) {
@@ -183,14 +199,35 @@ export class SetupWizard extends Modal {
 				'After importing, return here to continue folder setup.'
 			);
 		} else {
-			desc.setText(
-				'This plugin will upload your vault files to Google Drive. ' +
-				'Only files created by this plugin are visible because this plugin uses drive.file scope.'
-			);
+			if (isReauthenticationFlow) {
+				const folderName = this.plugin.settings.gDriveFolderName || 'your current vault folder';
+				desc.setText(
+					`Google account access expired. Re-authenticate to continue syncing with "${folderName}" on Google Drive.`
+				);
+			} else {
+				desc.setText(
+					'This plugin will upload your vault files to Google Drive. ' +
+					'Only files created by this plugin are visible because this plugin uses drive.file scope.'
+				);
+			}
 
 			const note = this.contentEl.createEl('p');
 			note.addClass('gdrive-sync-notice');
-			note.setText('Your browser will open for sign-in. Return to Obsidian after approval.');
+			note.setText(
+				isReauthenticationFlow
+					? 'Your browser will open for sign-in. If the saved folder is still available, setup will resume without choosing a folder again.'
+					: 'Your browser will open for sign-in. Return to Obsidian after approval.'
+			);
+		}
+
+		if (this.reuseSavedFolderAfterAuthentication) {
+			const savedFolderNote = this.contentEl.createEl('p');
+			savedFolderNote.addClass('gdrive-sync-notice');
+			savedFolderNote.setText(
+				this.plugin.settings.gDriveFolderName
+					? `After sign-in, the plugin will try to keep "${this.plugin.settings.gDriveFolderName}".`
+					: 'After sign-in, the plugin will try to keep the current Google Drive folder.'
+			);
 		}
 
 		if (this.plugin.authManager.isAuthenticated) {
@@ -299,17 +336,14 @@ export class SetupWizard extends Modal {
 				try {
 					await this.plugin.authManager.saveOAuthClientCredentials(clientId, clientSecret);
 					await this.plugin.authManager.authenticate();
-					this.plugin.refreshSettingTab();
-					const connectedEmail = this.plugin.settings.connectedEmail;
-					new Notice(connectedEmail ? `Connected as ${connectedEmail}` : 'Google account connected.');
-					this.step = 'folder';
-					this.renderStep();
+					connectBtn.setText('Finishing setup...');
+					await this.handleAuthenticationSuccess();
 				} catch (err) {
 					connectBtn.removeAttribute('disabled');
 					connectBtn.setText('Connect to Google Drive');
 					const errorEl = this.contentEl.querySelector('.gdrive-sync-error') ?? this.contentEl.createEl('p');
 					errorEl.addClass('gdrive-sync-error');
-					errorEl.setText(`Authentication failed: ${err instanceof Error ? err.message : String(err)}`);
+					errorEl.setText(`Could not continue setup: ${err instanceof Error ? err.message : String(err)}`);
 				}
 			})();
 		});
@@ -345,6 +379,12 @@ export class SetupWizard extends Modal {
 			'Choose where your vault should live on Google Drive. ' +
 			'You can create a folder or select one that already exists.'
 		);
+
+		if (this.folderStepNotice) {
+			const noticeEl = this.contentEl.createEl('p');
+			noticeEl.addClass('gdrive-sync-notice');
+			noticeEl.setText(this.folderStepNotice);
+		}
 
 		new Setting(this.contentEl)
 			.setName('Folder source')
@@ -460,6 +500,34 @@ export class SetupWizard extends Modal {
 				}
 			})();
 		});
+	}
+
+	private async handleAuthenticationSuccess(): Promise<void> {
+		const connectedEmail = this.plugin.settings.connectedEmail;
+		const connectedNotice = connectedEmail ? `Connected as ${connectedEmail}` : 'Google account connected.';
+
+		this.plugin.refreshSettingTab();
+		if (!this.reuseSavedFolderAfterAuthentication) {
+			new Notice(connectedNotice);
+			this.step = 'folder';
+			this.renderStep();
+			return;
+		}
+
+		const reusedFolder = await this.tryReuseSavedFolderSelection();
+		if (reusedFolder) {
+			if (this.plugin.settings.setupComplete) {
+				new Notice(`${connectedNotice} Existing Google Drive folder kept.`);
+				this.close();
+			}
+			return;
+		}
+
+		this.folderStepNotice =
+			'The saved Google Drive folder is no longer available for this account. Choose a folder to continue.';
+		new Notice(`${connectedNotice} Choose a folder to continue setup.`, 10000);
+		this.step = 'folder';
+		this.renderStep();
 	}
 
 	private renderInitialStateStep(): void {
@@ -707,6 +775,61 @@ export class SetupWizard extends Modal {
 		this.plugin.settings.setupComplete = false;
 		this.plugin.settings.lastSyncPageToken = '';
 		await this.resetSyncDatabase();
+		await this.plugin.saveSettings();
+		this.plugin.refreshSettingTab();
+	}
+
+	private async tryReuseSavedFolderSelection(): Promise<boolean> {
+		const folderId = this.plugin.settings.gDriveFolderId;
+		if (!folderId) {
+			return false;
+		}
+
+		try {
+			const metadata = await this.plugin.driveClient.getFileMetadata(folderId, 'id,name,mimeType,trashed');
+			if (metadata.trashed || metadata.mimeType !== 'application/vnd.google-apps.folder') {
+				await this.clearSavedFolderSelection();
+				return false;
+			}
+
+			this.selectedFolderId = metadata.id;
+			this.selectedFolderName = metadata.name;
+			this.selectedExistingFolderId = metadata.id;
+			this.newFolderName = metadata.name;
+			this.plugin.settings.gDriveFolderId = metadata.id;
+			this.plugin.settings.gDriveFolderName = metadata.name;
+			await this.plugin.saveSettings();
+			this.plugin.refreshSettingTab();
+
+			if (this.plugin.settings.setupComplete) {
+				return true;
+			}
+
+			this.initialPlan = null;
+			this.planningError = '';
+			this.step = 'initial-state';
+			this.renderStep();
+			void this.prepareInitialSyncPlan();
+			return true;
+		} catch (err) {
+			if (err instanceof DriveClientError && err.status !== 403 && err.status !== 404) {
+				throw err;
+			}
+			await this.clearSavedFolderSelection();
+			return false;
+		}
+	}
+
+	private async clearSavedFolderSelection(): Promise<void> {
+		this.selectedFolderId = '';
+		this.selectedFolderName = '';
+		this.selectedExistingFolderId = '';
+		this.newFolderName = this.app.vault.getName();
+		this.reuseSavedFolderAfterAuthentication = false;
+		this.plugin.settings.gDriveFolderId = '';
+		this.plugin.settings.gDriveFolderName = '';
+		this.plugin.settings.lastSyncPageToken = '';
+		this.plugin.settings.setupComplete = false;
 		await this.plugin.saveSettings();
 		this.plugin.refreshSettingTab();
 	}

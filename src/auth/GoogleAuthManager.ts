@@ -450,6 +450,7 @@ export class GoogleAuthManager {
 
 		this.clearReauthenticateNotice();
 		await this.plugin.saveSettings();
+		this.plugin.syncManager?.handleAuthenticationRecovered();
 		this.scheduleProactiveRefresh(expiresInMs);
 	}
 

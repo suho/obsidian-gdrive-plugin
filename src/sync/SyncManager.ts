@@ -570,6 +570,18 @@ export class SyncManager {
 		await this.syncDb.ensureLoaded();
 	}
 
+	handleAuthenticationRecovered(): void {
+		if (this.errorAlertMessage !== this.authRequiredNoticeMessage) {
+			return;
+		}
+		if (!this.plugin.settings.refreshToken || this.plugin.settings.needsReauthentication) {
+			return;
+		}
+
+		this.errorAlertMessage = '';
+		this.updateStatusFromCurrentState();
+	}
+
 	private ensureAuthReadyForSyncEntry(): boolean {
 		if (this.plugin.settings.refreshToken && !this.plugin.settings.needsReauthentication) {
 			return true;
